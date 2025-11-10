@@ -91,12 +91,22 @@ const reduceInstanceFaultSchema = z.object({
   reduceCount: z.number().int().min(1),
 }).strict();
 
+const increaseInstanceFaultSchema = z.object({
+  type: z.literal("increase-instance"),
+  targets: z.object({
+    services: z.array(faultTargetServiceSchema).default([]),
+  }).strict(),
+  timePeriods: faultTimeSchema,
+  increaseCount: z.number().int().min(1),
+}).strict();
+
 
 // Fault main schema
 export const faultSchema = z.discriminatedUnion("type", [
   increaseLatencyFaultSchema,
   increaseErrorRateFaultSchema,
   reduceInstanceFaultSchema,
+  increaseInstanceFaultSchema,
   injectTrafficFaultSchema
 ]);
 

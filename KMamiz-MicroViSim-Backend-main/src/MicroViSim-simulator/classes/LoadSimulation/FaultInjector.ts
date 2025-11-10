@@ -63,6 +63,13 @@ export default class FaultInjector {
             )
           }
 
+          // Fault increases the number of service replicas
+          if (ServiceFaultObj.getIncreasedReplicaCount() > 0) {
+            metricsInThisTimeSlot.addServiceReplicaCount(
+              uniqueServiceName,
+              ServiceFaultObj.getIncreasedReplicaCount()
+            )
+          }
         }
       }
     }
@@ -148,6 +155,7 @@ export default class FaultInjector {
         const isErrorRate = fault.type === 'increase-error-rate';
         const isTrafficInjection = fault.type === "inject-traffic"
         const isReduceInstance = fault.type === 'reduce-instance';
+        const isIncreaseInstance = fault.type === 'increase-instance';
 
 
         if (isLatency || isErrorRate || isTrafficInjection) {// Endpoint faults
@@ -177,11 +185,12 @@ export default class FaultInjector {
             }
           });
 
-        } else if (isReduceInstance) {// Service faults
+        } else if (isReduceInstance || isIncreaseInstance) {// Service faults
           const svcFaultRecordInThisTimeSlot = allServiceFaultRecords.get(timeSlotKey);
           if (!svcFaultRecordInThisTimeSlot) continue;
 
           const reducedReplicaCount = isReduceInstance ? fault.reduceCount : 0;
+          const increaseReplicaCount = isIncreaseInstance ? fault.increaseCount : 0;
 
           // Add fault records for each target service
           fault.targets.services.forEach(svc => {
@@ -191,7 +200,9 @@ export default class FaultInjector {
               faultObj = new ServiceFault();
               svcFaultRecordInThisTimeSlot.set(uniqueServiceName, faultObj);
             }
-            faultObj.setReducedReplicaCount(reducedReplicaCount);
+
+            if (isReduceInstance) faultObj.setReducedReplicaCount(reducedReplicaCount);
+            if (isIncreaseInstance) faultObj.setIncreasedReplicaCount(increaseReplicaCount);
           });
         }
       }
@@ -295,11 +306,14 @@ class EndpointFault {
  */
 class ServiceFault {
   private _reducedReplicaCount: number;
+  private _increasedReplicaCount: number;
 
   constructor(
     reducedReplicaCount: number = 0,
+    increasedReplicaCount: number = 0,
   ) {
     this._reducedReplicaCount = Math.max(0, reducedReplicaCount);
+    this._increasedReplicaCount = Math.max(0, increasedReplicaCount);
   }
 
   setReducedReplicaCount(next: number) {
@@ -308,6 +322,14 @@ class ServiceFault {
 
   getReducedReplicaCount() {
     return this._reducedReplicaCount;
+  }
+
+  setIncreasedReplicaCount(next: number) {
+    this._increasedReplicaCount = Math.max(0, next);
+  }
+
+  getIncreasedReplicaCount() {
+    return this._increasedReplicaCount;
   }
 
 }
