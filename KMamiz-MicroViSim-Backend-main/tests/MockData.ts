@@ -4598,6 +4598,7 @@ const MockHistoricalData: THistoricalData[] = [
         latencyCV: 0.17888543819998,
         uniqueServiceName: UniqueServiceName,
         risk: 0.1,
+        replicas: 1,
       },
     ],
   },

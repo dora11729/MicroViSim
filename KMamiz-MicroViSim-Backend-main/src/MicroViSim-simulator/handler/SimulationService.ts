@@ -87,6 +87,7 @@ export default class SimulationService extends IRequestHandler {
 
         //update to cache and create historical and aggregatedData
         try {
+          console.log("realtimeReplicaCountTimeline: ", simulationResult.realtimeReplicaCountTimeline);
           ServiceOperator.getInstance().updateStaticSimulateDataToCache({
             dependencies: simulationResult.endpointDependencies,
             dataTypes: simulationResult.dataType,
@@ -95,6 +96,7 @@ export default class SimulationService extends IRequestHandler {
 
           await ServiceOperator.getInstance().updateDynamicSimulateData({
             realtimeDataMap: simulationResult.realtimeCombinedDataPerTimeSlotMap,
+            realtimeReplicaCountTimeline: simulationResult.realtimeReplicaCountTimeline,
           });
 
           return {

@@ -40,7 +40,12 @@ export default class LoadSimulationHandler {
     baseReplicaCountList: TReplicaCount[],
     EndpointRealTimeBaseDatas: Map<string, TBaseDataWithResponses>,
     simulateDate: number
-  ): Map<string, TCombinedRealtimeData[]> {
+  ): {
+    realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]>;
+    metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>
+  } {
+
+    console.log("[Check] baseReplicaCountList = ", baseReplicaCountList);
 
     // Generate base metrics data for each service and endpoint from 
     // simulation config
@@ -50,6 +55,19 @@ export default class LoadSimulationHandler {
     );
 
     // console.log("metricsPerTimeSlotMap origin", metricsPerTimeSlotMap);
+
+    // collect replica timeline
+    const replicaTimeline: {
+      timeSlot: string;
+      replicas: Record<string, number>;
+    }[] = [];
+    for (const [timeSlotKey, metricsInThisTimeSlot] of metricsPerTimeSlotMap.entries()) {
+      replicaTimeline.push({
+        timeSlot: timeSlotKey,
+        replicas: Object.fromEntries(metricsInThisTimeSlot.getServiceReplicaCountMap())
+      });
+    }
+
 
     /*
       Inject faults before traffic propagation to ensure that both propagations 
@@ -127,7 +145,25 @@ export default class LoadSimulationHandler {
       propagationResultsWithOverloadError,
       simulateDate
     );
-    return realtimeCombinedDataPerTimeSlotMap;
+
+    const realtimeReplicaCountTimeline = new Map<string, TReplicaCount[]>();
+
+    for (const [timeSlotKey, metrics] of metricsPerTimeSlotMap.entries()) {
+      const replicaList: TReplicaCount[] = baseReplicaCountList.map(svc => ({
+        uniqueServiceName: svc.uniqueServiceName,
+        service: svc.service,
+        namespace: svc.namespace,
+        version: svc.version,
+        replicas: metrics.getServiceReplicaCount(svc.uniqueServiceName)
+      }));
+      realtimeReplicaCountTimeline.set(timeSlotKey, replicaList);
+    }
+
+
+    return {
+      realtimeCombinedDataPerTimeSlotMap: realtimeCombinedDataPerTimeSlotMap,
+      metricsPerTimeSlotMap: metricsPerTimeSlotMap,
+    };
   }
 
   private generateBaseMetricsPerTimeSlotMap(

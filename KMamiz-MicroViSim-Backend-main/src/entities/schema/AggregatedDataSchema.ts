@@ -15,6 +15,7 @@ export const AggregatedDataSchema = new Schema<TAggregatedData>({
       totalRequestErrors: { type: Number, required: true },
       avgRisk: { type: Number, required: true },
       avgLatencyCV: { type: Number, required: true },
+      avgReplicas: { type: Number, required: true }, 
       endpoints: [
         {
           uniqueServiceName: { type: String, required: true },

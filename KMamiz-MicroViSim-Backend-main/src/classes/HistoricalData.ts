@@ -144,6 +144,7 @@ export class HistoricalData {
 
         let avgRisk = 0;
         let avgLatencyCV = 0;
+        let avgReplicas = 0;
         const sumResult = serviceGroup.reduce(
           (prev, curr) => {
             prev.totalRequests += curr.requests;
@@ -151,12 +152,14 @@ export class HistoricalData {
             prev.totalRequestErrors += curr.requestErrors;
             avgRisk += curr.risk || 0;
             avgLatencyCV += curr.latencyCV;
+            avgReplicas += curr.replicas;
             return prev;
           },
           { totalRequests: 0, totalServerErrors: 0, totalRequestErrors: 0 }
         );
         avgRisk /= serviceGroup.length;
         avgLatencyCV /= serviceGroup.length;
+        avgReplicas /= serviceGroup.length;
 
         return {
           uniqueServiceName,
@@ -166,6 +169,7 @@ export class HistoricalData {
           ...sumResult,
           avgRisk,
           avgLatencyCV,
+          avgReplicas,
           endpoints,
         };
       }

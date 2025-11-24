@@ -90,8 +90,9 @@ export default function Metrics() {
         },
       },
       { name: "RequestErrors", field: "requestErrors" },
-      { name: "ServerErrors", field: "serverErrors" },
+      { name: "Service Errors", field: "serverErrors" },
       { name: "Latency (Coefficient of Variation)", field: "latencyCV" },
+      { name: "Replicas", field: "replicas" },
     ];
 
   const statisticsTimeOptions = (Config.backendConfig.SimulatorMode

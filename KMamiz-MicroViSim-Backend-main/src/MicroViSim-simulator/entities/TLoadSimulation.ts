@@ -191,10 +191,12 @@ export class TCMetricsPerTimeSlot {
   addServiceReplicaCount(uniqueServiceName: string, delta: number): void {
     const current = this.getServiceReplicaCount(uniqueServiceName);
     this.setServiceReplicaCount(uniqueServiceName, current + delta);
+    console.log("addServiceReplicaCount => delta: ", delta, "before: ", current, "after: ", this.getServiceReplicaCount(uniqueServiceName));
   }
   subtractServiceReplicaCount(uniqueServiceName: string, delta: number): void {
     const current = this.getServiceReplicaCount(uniqueServiceName);
     this.setServiceReplicaCount(uniqueServiceName, current - delta);
+    console.log("subtractServiceReplicaCount => delta: ", delta, "before: ", current, "after: ", this.getServiceReplicaCount(uniqueServiceName));
   }
 
   addServiceCapacityPerReplica(uniqueServiceName: string, delta: number): void {

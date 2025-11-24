@@ -359,7 +359,8 @@ export default class ServiceOperator {
   }
 
   async updateDynamicSimulateData(data: {
-    realtimeDataMap: Map<string, TCombinedRealtimeData[]>
+    realtimeDataMap: Map<string, TCombinedRealtimeData[]>,
+    realtimeReplicaCountTimeline: Map<string, TReplicaCount[]>
   }) {
     const sortedEntries = [...data.realtimeDataMap.entries()].sort(
       ([a], [b]) => {
@@ -370,14 +371,23 @@ export default class ServiceOperator {
         return minuteA - minuteB;
       }
     );
-    for (const [_, combinedDataList] of sortedEntries) {
+    for (const [timeKey, combinedDataList] of sortedEntries) {
       // console.log(`hourlyCombinedDataList ${key}: ${JSON.stringify(hourlyCombinedDataList,null,2)}`)
       if (combinedDataList.length > 0) {
         DataCache.getInstance()
           .get<CCombinedRealtimeData>("CombinedRealtimeData")
           .setData(new CombinedRealtimeDataList(combinedDataList));
-        await this.createHistoricalAndAggregatedDataSimulate();
       }
+
+      // update replica count at time slot
+      const replicaList = data.realtimeReplicaCountTimeline.get(timeKey);
+      if (replicaList) {
+        DataCache.getInstance()
+          .get<CReplicas>("ReplicaCounts")
+          .setData(replicaList);
+      }
+
+      await this.createHistoricalAndAggregatedDataSimulate();
     }
   }
 }

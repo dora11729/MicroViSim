@@ -183,6 +183,7 @@ export default class ServiceUtils {
       serverErrors: 0,
       requests: 0,
       risk: 0,
+      replicas: 0,
     };
   }
 }

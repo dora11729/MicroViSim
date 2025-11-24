@@ -55,6 +55,25 @@ export default class FaultInjector {
       if (serviceFaultRecordInThisTime) {
         for (const [uniqueServiceName, ServiceFaultObj] of serviceFaultRecordInThisTime.entries()) {
 
+          const reducedReplicaCount = ServiceFaultObj.getReducedReplicaCount ? ServiceFaultObj.getReducedReplicaCount() : 0;
+          const increaseReplicaCount = ServiceFaultObj.getIncreasedReplicaCount ? ServiceFaultObj.getIncreasedReplicaCount() : 0;
+
+          const instanceChange = increaseReplicaCount - reducedReplicaCount
+
+          // Change the number of service replicas
+          if (instanceChange < 0) {
+            metricsInThisTimeSlot.subtractServiceReplicaCount(
+              uniqueServiceName,
+              Math.abs(instanceChange)
+            )
+          } else if (instanceChange > 0) {
+            metricsInThisTimeSlot.addServiceReplicaCount(
+              uniqueServiceName,
+              instanceChange
+            )
+          }
+
+          /*
           // Fault reduces the number of service replicas
           if (ServiceFaultObj.getReducedReplicaCount() > 0) {
             metricsInThisTimeSlot.subtractServiceReplicaCount(
@@ -70,6 +89,7 @@ export default class FaultInjector {
               ServiceFaultObj.getIncreasedReplicaCount()
             )
           }
+            */
         }
       }
     }
@@ -114,15 +134,15 @@ export default class FaultInjector {
 
     loadSimulationSettings.faultInjection.forEach(fault => {
       /*
-        建立該 fault 的時間段機率 map（key: timeSlot, value: array of probabilities）
-        若同一筆故障設定中，管理員設了多個時間段，但不小心出現時間重疊情況，則機率會重疊
-        例如：
-          第一個時間段是 day1 startHour 0 duration 3 percent 80 
+        ?????? fault ???????????? map??key: timeSlot, value: array of probabilities??
+        ????????????????????????????????????????????????????????????????????????????????
+        ??????
+          ?????????????? day1 startHour 0 duration 3 percent 80 
             => {"0-0-0": 0.8, "0-0-1": 0.8, "0-0-2": 0.8}
-          第二個時間段是 day1 startHour 2 duration 2 percent 60 
+          ?????????????? day1 startHour 2 duration 2 percent 60 
             => {"0-0-2": 0.6, "0-0-3": 0.6}
-        在時間"0-0-2"會同時有兩個機率0.8跟0.6，則"0-0-2"發生機率為1 - 都不發生的機率 = 0.92 (92%)
-        合併完的 map就是：
+        ??????"0-0-2"????????????????0.8??0.6????"0-0-2"??????????1 - ?????????????? = 0.92 (92%)
+        ???????? map??????
             => {"0-0-0": 0.8, "0-0-1": 0.8, "0-0-2": 0.92, "0-0-3": 0.6}
       */
       const rawProbGroupMap = new Map<string, number[]>();
@@ -141,11 +161,11 @@ export default class FaultInjector {
       });
       const timeSlotProbMap = new Map<string, number>();
       for (const [timeSlotKey, probs] of rawProbGroupMap.entries()) {
-        const noneProb = probs.reduce((acc, p) => acc * (1 - p), 1);//都不發生的機率
+        const noneProb = probs.reduce((acc, p) => acc * (1 - p), 1);//??????????o??????????????v
         timeSlotProbMap.set(timeSlotKey, 1 - noneProb);
       }
 
-      // 故障注入
+      // ??G??????`??J
       for (const [timeSlotKey, prob] of timeSlotProbMap.entries()) {
         const isFaultOccur = Math.random() <= prob;
         if (!isFaultOccur) continue;
@@ -214,7 +234,7 @@ export default class FaultInjector {
     }
   }
 }
-//測試用
+//??????
 function printNestedFaultRecords(
   faultRecords: Map<string, Map<string, EndpointFault | ServiceFault>>,
   isEndpointFault: boolean
@@ -235,7 +255,8 @@ function printNestedFaultRecords(
       } else {
         const svcFault = faultObj as ServiceFault;
         result[timeSlotKey][uniqueName] = {
-          reducedReplicaCount: svcFault.getReducedReplicaCount()
+          reducedReplicaCount: svcFault.getReducedReplicaCount(),
+          increasedReplicaCount: svcFault.getIncreasedReplicaCount(),
         };
       }
     }

@@ -198,7 +198,7 @@ export default class GraphService extends IRequestHandler {
 
     historicalData.sort((a, b) => a.date.getTime() - b.date.getTime());
     const dates: number[] = [];
-    const metrics: [number, number, number, number, number, number][][] = [];
+    const metrics: [number, number, number, number, number, number, number][][] = [];
     const services = historicalData[0].services
       .sort((a, b) => a.uniqueServiceName.localeCompare(b.uniqueServiceName))
       .map((s) => `${s.service}.${s.namespace} (${s.version})`);
@@ -209,11 +209,12 @@ export default class GraphService extends IRequestHandler {
         a.uniqueServiceName.localeCompare(b.uniqueServiceName)
       );
       const metric = h.services.map(
-        (s): [number, number, number, number, number, number] => {
+        (s): [number, number, number, number, number, number, number] => {
           const requestErrors = s.requestErrors;
           const serverErrors = s.serverErrors;
           //TODO tofix
           const requests = s.requests;
+          const replicas = s.replicas;
 
 
           return [
@@ -223,6 +224,7 @@ export default class GraphService extends IRequestHandler {
             s.latencyCV,
             s.latencyMean,
             s.risk || 0,
+            replicas,
           ];
         }
       );

@@ -43,6 +43,7 @@ export default class Simulator {
     dataType: EndpointDataType[];
     basicReplicaCountList: TReplicaCount[];
     realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]>;
+    realtimeReplicaCountTimeline: Map<string, TReplicaCount[]>;
 
   } {
 
@@ -58,6 +59,7 @@ export default class Simulator {
         dataType: [],
         basicReplicaCountList: [],
         realtimeCombinedDataPerTimeSlotMap: new Map(),
+        realtimeReplicaCountTimeline: new Map(),
       };
     }
 
@@ -83,13 +85,14 @@ export default class Simulator {
     // );
 
     let realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]> = new Map();
+    let realtimeReplicaCountTimeline: Map<string, TReplicaCount[]> = new Map();
 
     const loadSimulationSettings = parsedConfig.loadSimulation;
 
     if (loadSimulationSettings && loadSimulationSettings.endpointMetrics.length > 0) { //loadSimulationSettings.endpointMetrics.length > 0 means there is traffic.
 
 
-      realtimeCombinedDataPerTimeSlotMap =
+      const metricsMap =
         LoadSimulationHandler.getInstance().generateCombinedRealtimeDataMap(
           loadSimulationSettings,
           dependOnMapWithCallProbability,
@@ -97,6 +100,23 @@ export default class Simulator {
           EndpointRealTimeBaseDatas,
           simulateDate
         )
+
+      realtimeCombinedDataPerTimeSlotMap = metricsMap.realtimeCombinedDataPerTimeSlotMap;
+
+      for (const [timeSlotKey, _] of realtimeCombinedDataPerTimeSlotMap.entries()) {
+        const metricsPerTimeSlot = metricsMap.metricsPerTimeSlotMap.get(timeSlotKey);
+        if (!metricsPerTimeSlot) continue;
+
+        const replicaList: TReplicaCount[] = basicReplicaCountList.map(base => ({
+          uniqueServiceName: base.uniqueServiceName,
+          service: base.service,
+          namespace: base.namespace,
+          version: base.version,
+          replicas: metricsPerTimeSlot.getServiceReplicaCount(base.uniqueServiceName)
+        }));
+
+        realtimeReplicaCountTimeline.set(timeSlotKey, replicaList);
+      }
     }
 
     try {
@@ -109,6 +129,7 @@ export default class Simulator {
         ),
         basicReplicaCountList,
         realtimeCombinedDataPerTimeSlotMap,
+        realtimeReplicaCountTimeline,
       };
     } catch (err) {
       const errMsg = `${err instanceof Error ? err.message : err}`;
@@ -122,6 +143,7 @@ export default class Simulator {
         dataType: [],
         basicReplicaCountList: [],
         realtimeCombinedDataPerTimeSlotMap: new Map(),
+        realtimeReplicaCountTimeline: new Map(),
       };
     }
   }

@@ -64,7 +64,8 @@ export default class CombinedRealtimeDataList {
             time,
             serviceMap,
             allEndpoints,
-            risks
+            risks,
+            replicas
           ),
         };
       }
@@ -109,7 +110,8 @@ export default class CombinedRealtimeDataList {
     time: number,
     serviceMap: Map<string, TCombinedRealtimeData[]>,
     allEndpoints: THistoricalEndpointInfo[],
-    risks: TRiskResult[]
+    risks: TRiskResult[],
+    replicas: TReplicaCount[] = [],
   ) {
     return [...serviceMap.entries()].map(
       ([uniqueServiceName, r]): THistoricalServiceInfo => {
@@ -129,6 +131,11 @@ export default class CombinedRealtimeDataList {
         const validLatencies = r.filter(rl => typeof (rl.latency.mean) === "number" && isFinite(rl.latency.mean));
         const meanLatency = validLatencies.reduce((sum, rl) => sum + rl.latency.mean, 0) / validLatencies.length;
 
+        const replicaInfo = replicas.find(
+          (rep) => rep.uniqueServiceName === uniqueServiceName
+        );
+        const replicaCount = replicaInfo ? replicaInfo.replicas : 1;
+
         return {
           date: new Date(time),
           endpoints,
@@ -140,6 +147,7 @@ export default class CombinedRealtimeDataList {
           serverErrors,
           latencyMean: (typeof (meanLatency) === "number" && isFinite(meanLatency)) ? meanLatency : 0,
           latencyCV: Math.max(...r.map((rl) => rl.latency.cv || 0)),
+          replicas: replicaCount,
           uniqueServiceName,
           risk: risks.find(
             (rsk) => rsk.uniqueServiceName === uniqueServiceName
