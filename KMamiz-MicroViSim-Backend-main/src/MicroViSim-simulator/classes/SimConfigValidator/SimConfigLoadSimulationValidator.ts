@@ -64,6 +64,15 @@ export default class SimConfigLoadSimulationValidator {
             //assign uniqueServiceName
             version.uniqueServiceName = uniqueServiceName;
           }
+
+          if (version.autoScaling) {
+            if (version.autoScaling.scaleDownThreshold >= version.autoScaling.scaleUpThreshold) {
+              errorMessages.push({
+                errorLocation: versionLocation,
+                message: `service "${service.serviceName}" in namespace "${namespace.namespace}" with version "${version.version}": scaleDownThreshold cannot be equal or less than scaleUpThreshold.`,
+              });
+            }
+          }
         })
       })
     });

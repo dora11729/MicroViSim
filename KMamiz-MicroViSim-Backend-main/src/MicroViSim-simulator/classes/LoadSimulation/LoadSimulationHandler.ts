@@ -7,7 +7,8 @@ import {
 } from "../../entities/TSimConfigLoadSimulation";
 import {
   TBaseDataWithResponses,
-  TDependOnMapWithCallProbability
+  TDependOnMapWithCallProbability,
+  TEndpointPropagationStatsForOneTimeSlot
 } from "../../entities/TLoadSimulation";
 import { TCMetricsPerTimeSlot } from "../../entities/TLoadSimulation";
 import { TReplicaCount } from "../../../entities/TReplicaCount";
@@ -17,6 +18,7 @@ import LoadSimulationDataGenerator from "./LoadSimulationDataGenerator";
 import LoadSimulationPropagator from "./LoadSimulationPropagator";
 import FaultInjector from "./FaultInjector";
 import OverloadErrorRateEstimator from "./OverloadErrorRateEstimator";
+import SimulatorUtils from "../SimulatorUtils";
 
 export default class LoadSimulationHandler {
   private static instance?: LoadSimulationHandler;
@@ -99,6 +101,14 @@ export default class LoadSimulationHandler {
       metricsPerTimeSlotMap,
       false
     );
+
+    ////// ⭐👇👇✅✅
+    this.applyAutoScalingForTimeSlot(
+      propagationResultsWithBasicError,
+      loadSimulationSettings.serviceMetrics,
+      metricsPerTimeSlotMap
+    )
+
 
     /*
       Estimate overload level for each service based on expected incoming traffic, the number of replicas, and per-replica throughput capacity  
@@ -375,4 +385,145 @@ export default class LoadSimulationHandler {
     return result;
   }
 
+  /*
+    判斷service是否開啟autoScaling，有的話判斷是否進行scale
+     grater than scaleUPThreshold => 產能不足
+     less than scaleDownThreshold => 產能太足
+  */
+  private applyAutoScalingForTimeSlot(
+    propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
+    serviceMetrics: TSimulationNamespaceServiceMetrics[],
+    metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>,
+  ) {
+    const serviceReceivedRequestCount = this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithBasicError);
+
+    // ns: namespace
+    for (const ns of serviceMetrics) {
+      for (const svc of ns.services) {
+        for (const ver of svc.versions) {
+          if (ver.uniqueServiceName && ver.autoScaling) {
+            const uniqueServiceName = ver.uniqueServiceName;
+            const scaleUpThreshold = ver.autoScaling.scaleUpThreshold;
+            const scaleDownThreshold = ver.autoScaling.scaleDownThreshold;
+            const maxScaleCounts = ver.autoScaling.maxScaleCounts;
+
+            for (const [timeSlotKey, serviceCounts] of serviceReceivedRequestCount.entries()) {
+              const metricsInThisTimeSlot = metricsPerTimeSlotMap.get(timeSlotKey);
+              if (metricsInThisTimeSlot) {
+                // Get request count for the service in this hour
+                const requestCountInThisHour = serviceCounts.get(uniqueServiceName) ?? 0;
+                const requestCountPerSecond = requestCountInThisHour / 3600;
+
+                const replicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
+                const replicaMaxRPS = metricsInThisTimeSlot.getServiceCapacityPerReplica(uniqueServiceName);
+
+                console.log("----------")
+                console.log("timeSlotKey=", timeSlotKey)
+                console.log("uniqueServiceName=", uniqueServiceName)
+                console.log("requestCountPerSecond=", requestCountPerSecond)
+                console.log("replicaCount=", replicaCount)
+                console.log("replicaMaxRPS=", replicaMaxRPS)
+                console.log("maxScaleCounts=", maxScaleCounts)
+
+                // denominator(分母) = 0 => threshold= NaN
+                if (replicaMaxRPS == 0 || replicaCount == 0) {
+                  console.log("threshold= NaN, scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
+                  continue;
+                }
+                const threshold = requestCountPerSecond / (replicaMaxRPS * replicaCount);
+                const thresholdPerReplica = requestCountPerSecond / replicaMaxRPS
+
+                console.log("threshold=", threshold, ", scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
+
+                // needReplicas: 剛剛好 高過scaleUpThreshold 或 低過scaleDownThreshold 的replica數
+                if (threshold > scaleUpThreshold) {
+                  console.log("addServiceReplicaCount.")
+                  const needReplicas = Math.ceil(thresholdPerReplica / scaleUpThreshold);
+                  const diffReplicas = needReplicas - replicaCount;
+                  console.log("needReplicas=", needReplicas, ", diffReplicas=", diffReplicas)
+                  if (diffReplicas > 0) {
+                    metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, Math.min(maxScaleCounts, diffReplicas));
+                  }
+
+                  //metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, 1);
+                } else if (replicaCount > 1 && threshold < scaleDownThreshold) {
+                  console.log("subtractServiceReplicaCount.")
+                  const needReplicas = Math.ceil(thresholdPerReplica / scaleDownThreshold)
+                  let diffReplicas = replicaCount - needReplicas
+                  console.log("needReplicas=", needReplicas, ", diffReplicas=", diffReplicas)
+                  if (diffReplicas > 0) {
+                    diffReplicas = Math.min(diffReplicas, maxScaleCounts);
+
+                    // at least leave 1
+                    const finalDiff = Math.min(diffReplicas, replicaCount - 1);
+                    if (finalDiff > 0) {
+                      metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, Math.min(maxScaleCounts, diffReplicas))
+                    }
+                  }
+
+                  //metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, 1);
+                }
+
+                /*
+                if (threshold > scaleUpThreshold) {
+                  console.log("addServiceReplicaCount.")
+                  metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, 1);
+                } else if (replicaCount > 1 && threshold < scaleDownThreshold) {
+                  console.log("subtractServiceReplicaCount.")
+                  metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, 1);
+                }
+                */
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+
+  // copy from OverloadErrorRateEstimator
+  private computeRequestCountsPerServicePerTimeSlot(
+    propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>
+  ): Map<string, Map<string, number>> {
+    /*
+     * This Map aggregates the total request counts for each service at specific time intervals.
+     *
+     * Top-level Map:
+     * Key:   string - A time slot key in "day-hour-minute" format (e.g., "0-10-30"), representing the start of a specific time interval.
+     * Value: Map<string, number> - Total request counts for each service during this time interval.
+     *
+     * Inner Map (Value of Top-level Map):
+     * Key:   string - uniqueServiceName.
+     * Value: number - The aggregated request count for that specific service during the time interval.
+     */
+
+    // Used to store the final statistical results. The key is the timestamp and the value 
+    // is the number of requests for each service at that timestamp.
+    const serviceRequestCountsPerTimeSlot = new Map<string, Map<string, number>>();
+
+    for (const [timeSlotKey, timeSlotStats] of propagationResultsWithBasicError.entries()) {
+
+      if (!serviceRequestCountsPerTimeSlot.has(timeSlotKey)) {
+        serviceRequestCountsPerTimeSlot.set(timeSlotKey, new Map());
+      }
+
+      // Retrieve the map of services and their request counts for the current time slot
+      const serviceMap = serviceRequestCountsPerTimeSlot.get(timeSlotKey)!;
+
+      // timeSlotStats contains statistics for all endpoints during this time slot
+      for (const [uniqueEndpointName, stats] of timeSlotStats.entries()) {
+        // Extract the service ID from the endpoint ID
+        const uniqueServiceName = SimulatorUtils.extractUniqueServiceNameFromEndpointName(uniqueEndpointName);
+
+        // Get the current aggregated count for this service, defaulting to 0 if none exists
+        const prevCount = serviceMap.get(uniqueServiceName) || 0;
+
+        // Add the current endpoint's request count to the service's total count
+        serviceMap.set(uniqueServiceName, prevCount + stats.requestCount);
+      }
+    }
+
+    return serviceRequestCountsPerTimeSlot;
+  }
 }

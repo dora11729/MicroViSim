@@ -34,12 +34,23 @@ export const loadSimulationConfigSchema = z.object({
 
 
 // Service metric
+export const simulationServiceVersionScalingSchema = z.object({
+  scaleUpThreshold: z.number()
+    .min(0.01, {message: "scaleUpThreshold must be at least 0.01."})
+    .max(1, { message: "scaleUpThreshold cannot exceed 1." }),
+  scaleDownThreshold: z.number()
+    .min(0.01, {message: "scaleDownThreshold must be at least 0.01."})
+    .max(1, { message: "scaleDownThreshold cannot exceed 1." }),
+  maxScaleCounts: z.number().min(1, {message: "maxScaleCounts must be at least 1."}),
+}).strict();
+
 export const simulationServiceVersionMetricSchema = z.object({
   uniqueServiceName: z.string().optional(),// Users do not need to provide this.
   version: versionSchema,
   capacityPerReplica: z.number()
     .min(0.01, { message: "capacityPerReplica must be at least 0.01." })
     .default(1),
+  autoScaling: simulationServiceVersionScalingSchema.optional(),
 }).strict()
   .superRefine(systemGeneratedFieldsSuperRefine());
 
@@ -103,6 +114,7 @@ export const loadSimulationSchema = z.object({
 /**** Schema to type ****/
 export type TFallbackStrategy = typeof fallbackStrategies[number];
 export type TLoadSimulationConfig = z.infer<typeof loadSimulationConfigSchema>;
+export type TSimulationServiceVersionScalingSchema = z.infer<typeof simulationServiceVersionScalingSchema>;
 export type TSimulationServiceVersionMetric = z.infer<typeof simulationServiceVersionMetricSchema>;
 export type TSimulationServiceMetric = z.infer<typeof simulationServiceMetricSchema>;
 export type TSimulationNamespaceServiceMetrics = z.infer<typeof simulationNamespaceServiceMetricsSchema>;
