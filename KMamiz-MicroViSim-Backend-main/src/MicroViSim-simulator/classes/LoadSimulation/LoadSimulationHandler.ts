@@ -19,6 +19,7 @@ import LoadSimulationPropagator from "./LoadSimulationPropagator";
 import FaultInjector from "./FaultInjector";
 import OverloadErrorRateEstimator from "./OverloadErrorRateEstimator";
 import SimulatorUtils from "../SimulatorUtils";
+import MLScalingHandler from "./MLScalingHandler";
 
 export default class LoadSimulationHandler {
   private static instance?: LoadSimulationHandler;
@@ -28,29 +29,28 @@ export default class LoadSimulationHandler {
   private propagator: LoadSimulationPropagator;
   private faultInjector: FaultInjector;
   private overloadErrorRateEstimator: OverloadErrorRateEstimator;
+  private mlScalingHandler: MLScalingHandler;
 
   private constructor() {
     this.dataGenerator = new LoadSimulationDataGenerator();
     this.propagator = new LoadSimulationPropagator();
     this.faultInjector = new FaultInjector();
     this.overloadErrorRateEstimator = new OverloadErrorRateEstimator();
+    this.mlScalingHandler = MLScalingHandler.getInstance();
   }
 
-  generateCombinedRealtimeDataMap(
+  async generateCombinedRealtimeDataMap(
     loadSimulationSettings: TLoadSimulationSettings,
     dependOnMapWithCallProbability: TDependOnMapWithCallProbability,
     baseReplicaCountList: TReplicaCount[],
     EndpointRealTimeBaseDatas: Map<string, TBaseDataWithResponses>,
     simulateDate: number
-  ): {
+  ): Promise<{
     realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]>;
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>
-  } {
+  }> {
 
-    console.log("[Check] baseReplicaCountList = ", baseReplicaCountList);
-
-    // Generate base metrics data for each service and endpoint from 
-    // simulation config
+    // Generate base metrics data for each service and endpoint from simulation config
     const metricsPerTimeSlotMap = this.generateBaseMetricsPerTimeSlotMap(
       loadSimulationSettings,
       baseReplicaCountList
@@ -73,27 +73,18 @@ export default class LoadSimulationHandler {
 
     /*
       Inject faults before traffic propagation to ensure that both propagations 
-      encounter the same fault conditions.(This is to ensure that the estimated 
-      service load after the first propagation is accurate.)
+      encounter the same fault conditions. This ensures that the estimated 
+      service load after the first propagation is accurate.
     */
     this.faultInjector.injectFault(
       loadSimulationSettings,
       metricsPerTimeSlotMap
     );
 
-    // console.log("metricsPerTimeSlotMap after faultInjector", metricsPerTimeSlotMap);
-
     /* 
       Use the base error rate to simulate traffic propagation and calculate the 
       expected incoming traffic for each service under normal (non-overloaded) 
-      conditions propagationResultsWithBasicError: 
-      Map<
-        Key: "day-hour-minute", 
-        Value: Map<
-          key: uniqueEndpointName, 
-          value:requestCount
-        >
-      >
+      conditions.
     */
     const propagationResultsWithBasicError = this.propagator.simulatePropagation(
       loadSimulationSettings.endpointMetrics,
@@ -102,8 +93,8 @@ export default class LoadSimulationHandler {
       false
     );
 
-    ////// ⭐👇👇✅✅
-    this.applyAutoScalingForTimeSlot(
+    // Apply auto-scaling decisions based on basic error rate propagation
+    await this.applyAutoScalingForTimeSlot(
       propagationResultsWithBasicError,
       loadSimulationSettings.serviceMetrics,
       metricsPerTimeSlotMap
@@ -111,8 +102,9 @@ export default class LoadSimulationHandler {
 
 
     /*
-      Estimate overload level for each service based on expected incoming traffic, the number of replicas, and per-replica throughput capacity  
-      Then combine with base error rate to calculate the adjusted error rate per endpoint, per timeSlot
+      Estimate overload level for each service based on expected incoming traffic, 
+      the number of replicas, and per-replica throughput capacity. Then combine 
+      with base error rate to calculate the adjusted error rate per endpoint, per timeSlot.
     */
     this.overloadErrorRateEstimator.adjustedErrorRateByOverload(
       loadSimulationSettings.config.overloadErrorRateIncreaseFactor,
@@ -131,24 +123,6 @@ export default class LoadSimulationHandler {
       metricsPerTimeSlotMap,
       true,
     );
-
-    // console.log("propagationResultsWithOverloadError", propagationResultsWithOverloadError)
-
-    // console.log("propagationResultsWithOverloadError =")
-    // for (const [timeKey, endpointMap] of propagationResultsWithOverloadError.entries()) {
-    //   console.log(`Time: ${timeKey}`);
-    //   for (const [uniqueEndpointName, stats] of endpointMap.entries()) {
-    //     console.log(`  Endpoint: ${uniqueEndpointName}`);
-    //     console.log(`    requestCount: ${stats.requestCount}`);
-    //     console.log(`    ownErrorCount: ${stats.ownErrorCount}`);
-    //     console.log(`    downstreamErrorCount: ${stats.downstreamErrorCount}`);
-    //     console.log(`    latencyStatsByStatus:`);
-    //     for (const [status, latencyStats] of stats.latencyStatsByStatus.entries()) {
-    //       console.log(`      Status ${status}: mean=${latencyStats.mean}, cv=${latencyStats.cv}`);
-    //     }
-    //   }
-    // }
-    // console.log("end propagationResultsWithOverloadError  ==================")
 
     const realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]> = this.dataGenerator.generateRealtimeDataFromSimulationResults(
       EndpointRealTimeBaseDatas,
@@ -390,95 +364,116 @@ export default class LoadSimulationHandler {
      grater than scaleUPThreshold => 產能不足
      less than scaleDownThreshold => 產能太足
   */
-  private applyAutoScalingForTimeSlot(
+  private async applyAutoScalingForTimeSlot(
     propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
     serviceMetrics: TSimulationNamespaceServiceMetrics[],
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>,
   ) {
     const serviceReceivedRequestCount = this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithBasicError);
+    const sortedTimeSlotKeys = Array.from(metricsPerTimeSlotMap.keys()).sort(
+      (a, b) => this.timeSlotKeyToMinutes(a) - this.timeSlotKeyToMinutes(b)
+    );
 
     // ns: namespace
+    const dataset = [];
     for (const ns of serviceMetrics) {
       for (const svc of ns.services) {
         for (const ver of svc.versions) {
-          if (ver.uniqueServiceName && ver.autoScaling) {
-            const uniqueServiceName = ver.uniqueServiceName;
-            const scaleUpThreshold = ver.autoScaling.scaleUpThreshold;
-            const scaleDownThreshold = ver.autoScaling.scaleDownThreshold;
-            const maxScaleCounts = ver.autoScaling.maxScaleCounts;
+          if (!ver.uniqueServiceName || !ver.autoScaling) continue;
 
-            for (const [timeSlotKey, serviceCounts] of serviceReceivedRequestCount.entries()) {
-              const metricsInThisTimeSlot = metricsPerTimeSlotMap.get(timeSlotKey);
-              if (metricsInThisTimeSlot) {
-                // Get request count for the service in this hour
-                const requestCountInThisHour = serviceCounts.get(uniqueServiceName) ?? 0;
-                const requestCountPerSecond = requestCountInThisHour / 3600;
+          // 有開 autoScaling
+          // model: null => 只有 threshold 決定是否 scale (簡易 HPA 邏輯)
+          // model: not null => ML bodel (xgboost, random_forest, lstm) 預測下一個時間點的 request count，再決定是否 scale
+          const uniqueServiceName = ver.uniqueServiceName;
+          const model = ver.autoScaling.model ?? null;
+          const { scaleUpThreshold, scaleDownThreshold, maxScaleCounts } = ver.autoScaling;
 
-                const replicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
-                const replicaMaxRPS = metricsInThisTimeSlot.getServiceCapacityPerReplica(uniqueServiceName);
+          for (const timeSlotKey of sortedTimeSlotKeys) {
+            const metricsInThisTimeSlot = metricsPerTimeSlotMap.get(timeSlotKey);
+            const serviceCounts = serviceReceivedRequestCount.get(timeSlotKey);
+            if (!metricsInThisTimeSlot || !serviceCounts) continue;
 
-                console.log("----------")
-                console.log("timeSlotKey=", timeSlotKey)
-                console.log("uniqueServiceName=", uniqueServiceName)
-                console.log("requestCountPerSecond=", requestCountPerSecond)
-                console.log("replicaCount=", replicaCount)
-                console.log("replicaMaxRPS=", replicaMaxRPS)
-                console.log("maxScaleCounts=", maxScaleCounts)
+            // Get request count for the service in this hour
+            const requestCountInThisHour = serviceCounts.get(uniqueServiceName) ?? 0;
+            var requestCountPerSecond = requestCountInThisHour / 3600;
 
-                // denominator(分母) = 0 => threshold= NaN
-                if (replicaMaxRPS == 0 || replicaCount == 0) {
-                  console.log("threshold= NaN, scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
-                  continue;
-                }
-                const threshold = requestCountPerSecond / (replicaMaxRPS * replicaCount);
-                const thresholdPerReplica = requestCountPerSecond / replicaMaxRPS
+            var replicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
+            const replicaMaxRPS = metricsInThisTimeSlot.getServiceCapacityPerReplica(uniqueServiceName);
 
-                console.log("threshold=", threshold, ", scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
+            /*
+            console.log("----------")
+            console.log("timeSlotKey=", timeSlotKey)
+            console.log("uniqueServiceName=", uniqueServiceName)
+            console.log("requestCountPerSecond=", requestCountPerSecond)
+            console.log("replicaCount=", replicaCount)
+            console.log("replicaMaxRPS=", replicaMaxRPS)
+            console.log("maxScaleCounts=", maxScaleCounts)
+            */
 
-                // needReplicas: 剛剛好 高過scaleUpThreshold 或 低過scaleDownThreshold 的replica數
-                if (threshold > scaleUpThreshold) {
-                  console.log("addServiceReplicaCount.")
-                  const needReplicas = Math.ceil(thresholdPerReplica / scaleUpThreshold);
-                  const diffReplicas = needReplicas - replicaCount;
-                  console.log("needReplicas=", needReplicas, ", diffReplicas=", diffReplicas)
-                  if (diffReplicas > 0) {
-                    metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, Math.min(maxScaleCounts, diffReplicas));
-                  }
+            // use ML model to predict RPS as requestCountPerSecond
+            if (model !== null) {
+              const history = model === "lstm"
+                ? this.mlScalingHandler.buildHistoryWindow(
+                  uniqueServiceName,
+                  timeSlotKey,
+                  sortedTimeSlotKeys,
+                  serviceReceivedRequestCount,
+                  metricsPerTimeSlotMap
+                )
+                : undefined;
 
-                  //metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, 1);
-                } else if (replicaCount > 1 && threshold < scaleDownThreshold) {
-                  console.log("subtractServiceReplicaCount.")
-                  const needReplicas = Math.ceil(thresholdPerReplica / scaleDownThreshold)
-                  let diffReplicas = replicaCount - needReplicas
-                  console.log("needReplicas=", needReplicas, ", diffReplicas=", diffReplicas)
-                  if (diffReplicas > 0) {
-                    diffReplicas = Math.min(diffReplicas, maxScaleCounts);
+              const predictedRPS = await this.mlScalingHandler.predictNextRPS(
+                model,
+                { replicaCount, requestCountPerSecond, replicaMaxRPS },
+                history ?? undefined
+              );
 
-                    // at least leave 1
-                    const finalDiff = Math.min(diffReplicas, replicaCount - 1);
-                    if (finalDiff > 0) {
-                      metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, Math.min(maxScaleCounts, diffReplicas))
-                    }
-                  }
-
-                  //metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, 1);
-                }
-
-                /*
-                if (threshold > scaleUpThreshold) {
-                  console.log("addServiceReplicaCount.")
-                  metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, 1);
-                } else if (replicaCount > 1 && threshold < scaleDownThreshold) {
-                  console.log("subtractServiceReplicaCount.")
-                  metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, 1);
-                }
-                */
+              if (predictedRPS !== null) {
+                console.log(`[ML:${model}] `, uniqueServiceName, ` ${timeSlotKey}: original RPS: ${requestCountPerSecond}, predicted: ${predictedRPS}`);
+                
+                requestCountPerSecond = predictedRPS;
               }
             }
+
+            const desireReplicas = this.computeDesiredReplicas(
+              requestCountPerSecond,
+              replicaCount,
+              replicaMaxRPS,
+              scaleUpThreshold,
+              scaleDownThreshold
+            );
+
+            // null => 不用動
+            if (desireReplicas !== null) {
+              const diffReplicas = desireReplicas - replicaCount;
+              if (diffReplicas > 0) {
+                metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, Math.min(maxScaleCounts, diffReplicas));
+              } else if (diffReplicas < 0) {
+                // at least leave 1
+                const finalDiff = Math.min(maxScaleCounts, -diffReplicas, replicaCount - 1);
+                if (finalDiff > 0) {
+                  metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, finalDiff)
+                }
+              }
+            }
+
+            // ------------------------------------------------
+            replicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
+            dataset.push({
+              timeSlotKey,
+              service: uniqueServiceName,
+              requestCountPerSecond,
+              replicaCount,
+              replicaMaxRPS
+            });
+            // ------------------------------------------------
+
           }
         }
       }
     }
+    console.dir(dataset, { depth: null, maxArrayLength: null });
+
   }
 
 
@@ -525,5 +520,64 @@ export default class LoadSimulationHandler {
     }
 
     return serviceRequestCountsPerTimeSlot;
+  }
+
+
+  // return desiredReplicas
+  // 之後test好 可以再整理一下(刪掉註解)
+  private computeDesiredReplicas(
+    requestCountPerSecond: number,
+    replicaCount: number,
+    replicaMaxRPS: number,
+    scaleUpThreshold: number,
+    scaleDownThreshold: number
+  ): number | null {
+
+    // denominator(分母) = 0 => threshold= NaN
+    if (replicaMaxRPS == 0 || replicaCount == 0) {
+      //console.log("threshold= NaN, scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
+      return null;
+    }
+
+    const threshold = requestCountPerSecond / (replicaMaxRPS * replicaCount);
+    const thresholdPerReplica = requestCountPerSecond / replicaMaxRPS
+
+    //console.log("threshold=", threshold, ", scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
+
+    // desiredReplicas: 剛剛好 高過scaleUpThreshold 或 低過scaleDownThreshold 的replica數
+    if (threshold > scaleUpThreshold) {
+      const desiredReplicas = Math.ceil(thresholdPerReplica / scaleUpThreshold);
+      //console.log("Rule addServiceReplicaCount: desiredReplicas=", desiredReplicas)
+
+      return desiredReplicas;
+      /*
+      if (diffReplicas > 0) {
+        metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, Math.min(maxScaleCounts, diffReplicas));
+      }
+        */
+    } else if (replicaCount > 1 && threshold < scaleDownThreshold) {
+      const desiredReplicas = Math.ceil(thresholdPerReplica / scaleDownThreshold)
+      //console.log("Rule subtractServiceReplicaCount: desiredReplicas=", desiredReplicas)
+
+      return desiredReplicas;
+      /*
+      if (diffReplicas > 0) {
+        diffReplicas = Math.min(diffReplicas, maxScaleCounts);
+
+        // at least leave 1
+        const finalDiff = Math.min(diffReplicas, replicaCount - 1);
+        if (finalDiff > 0) {
+          metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, Math.min(maxScaleCounts, diffReplicas))
+        }
+      }
+        */
+    }
+
+    return null;
+  }
+
+  private timeSlotKeyToMinutes(timeSlotKey: string): number {
+    const [day, hour, minute] = timeSlotKey.split("-").map(Number);
+    return day * 24 * 60 + hour * 60 + minute;
   }
 }

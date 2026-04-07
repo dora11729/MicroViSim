@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  microvisum-backend:
+    build: ./KMamiz-MicroViSim-Backend   # 你的 TS 專案路徑
+    ports:
+      - "3000:3000"
+    environment:
+      - ML_SERVICE_URL=http://ml-sidecar:8000   # ← 用 service name 互連
+    depends_on:
+      - ml-sidecar
+    networks:
+      - app-network
+
+  ml-sidecar:
+    build: ./ml-sidecar
+    ports:
+      - "8000:8000"                # 本地 debug 用，正式可以拿掉
+    volumes:
+      - ./ml-sidecar/models:/app/models   # 掛載模型資料夾，方便更換模型
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

@@ -112,3 +112,53 @@ spec:
       targetPort: 3000
   externalIPs:
     - 192.168.49.2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kmamiz-ml-sidecar
+  namespace: kmamiz-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kmamiz-ml-sidecar
+  template:
+    metadata:
+      labels:
+        app: kmamiz-ml-sidecar
+    spec:
+      containers:
+        - name: kmamiz-ml-sidecar
+          image: "wys899195/kmamiz-ml-sidecar:latest"
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: models-volume
+              mountPath: /app/models
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30   # tensorflow 載入較慢
+            periodSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: models-volume
+          hostPath:
+            path: /ml-models          # minikube mount 掛進來的路徑
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kmamiz-ml-sidecar
+  namespace: kmamiz-system
+spec:
+  selector:
+    app: kmamiz-ml-sidecar
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP                     # 只對 cluster 內部開放，不需要 NodePort

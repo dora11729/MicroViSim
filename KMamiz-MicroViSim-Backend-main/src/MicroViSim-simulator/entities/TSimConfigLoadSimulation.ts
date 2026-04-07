@@ -34,7 +34,15 @@ export const loadSimulationConfigSchema = z.object({
 
 
 // Service metric
+const autoScalingModels = [
+  "xgboost", 
+  "random_forest", 
+  "lstm"
+] as const;
+
 export const simulationServiceVersionScalingSchema = z.object({
+  model: z.enum(autoScalingModels, { message: "model must be one of 'xgboost', 'random_forest', or 'lstm'." })
+    .optional(),
   scaleUpThreshold: z.number()
     .min(0.01, {message: "scaleUpThreshold must be at least 0.01."})
     .max(1, { message: "scaleUpThreshold cannot exceed 1." }),

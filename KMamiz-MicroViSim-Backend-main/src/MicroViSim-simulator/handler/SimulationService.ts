@@ -69,7 +69,7 @@ export default class SimulationService extends IRequestHandler {
       await ImportExportHandler.getInstance().clearData();
 
       //retrieve data from yaml
-      const simulationResult = Simulator.getInstance().generateSimulationDataFromConfig(
+      const simulationResult = await Simulator.getInstance().generateSimulationDataFromConfig(
         yamlData, simulateDate
       );
 

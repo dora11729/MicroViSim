@@ -6,6 +6,7 @@ metadata:
 data:
   PORT: "3000" 
   ZIPKIN_URL: "http://zipkin.istio-system:9411"
+  ML_SERVICE_URL: "http://kmamiz-ml-sidecar.kmamiz-system.svc.cluster.local:8000"
   LOG_LEVEL: "info"
   IS_RUNNING_IN_K8S: "true"
   ENVOY_LOG_LEVEL: "warning" # accept: info | warning | error

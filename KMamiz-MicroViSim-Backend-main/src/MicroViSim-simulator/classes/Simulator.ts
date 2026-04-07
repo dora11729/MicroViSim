@@ -36,7 +36,7 @@ export default class Simulator {
   static getInstance = () => this.instance || (this.instance = new this());
   private constructor() { };
 
-  generateSimulationDataFromConfig(configYamlString: string, simulateDate: number): {
+  async generateSimulationDataFromConfig(configYamlString: string, simulateDate: number): Promise<{
     validationErrorMessage: string; // error message when validating YAML format
     convertingErrorMessage: string; // error message when converting to realtime data
     endpointDependencies: TEndpointDependency[];
@@ -44,8 +44,7 @@ export default class Simulator {
     basicReplicaCountList: TReplicaCount[];
     realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]>;
     realtimeReplicaCountTimeline: Map<string, TReplicaCount[]>;
-
-  } {
+  }> {
 
 
     // Validate and preprocess simulation configuration
@@ -93,7 +92,7 @@ export default class Simulator {
 
 
       const metricsMap =
-        LoadSimulationHandler.getInstance().generateCombinedRealtimeDataMap(
+        await LoadSimulationHandler.getInstance().generateCombinedRealtimeDataMap(
           loadSimulationSettings,
           dependOnMapWithCallProbability,
           basicReplicaCountList,
