@@ -17,7 +17,7 @@ import { TCombinedRealtimeData } from "../../../entities/TCombinedRealtimeData";
 import LoadSimulationDataGenerator from "./LoadSimulationDataGenerator";
 import LoadSimulationPropagator from "./LoadSimulationPropagator";
 import FaultInjector from "./FaultInjector";
-import OverloadErrorRateEstimator from "./OverloadErrorRateEstimator";
+import OverloadErrorRateAndLatencyEstimator from "./OverloadErrorRateAndLatencyEstimator";
 import SimulatorUtils from "../SimulatorUtils";
 import MLScalingHandler from "./MLScalingHandler";
 
@@ -28,14 +28,14 @@ export default class LoadSimulationHandler {
   private dataGenerator: LoadSimulationDataGenerator;
   private propagator: LoadSimulationPropagator;
   private faultInjector: FaultInjector;
-  private overloadErrorRateEstimator: OverloadErrorRateEstimator;
+  private overloadErrorRateAndLatencyEstimator: OverloadErrorRateAndLatencyEstimator;
   private mlScalingHandler: MLScalingHandler;
 
   private constructor() {
     this.dataGenerator = new LoadSimulationDataGenerator();
     this.propagator = new LoadSimulationPropagator();
     this.faultInjector = new FaultInjector();
-    this.overloadErrorRateEstimator = new OverloadErrorRateEstimator();
+    this.overloadErrorRateAndLatencyEstimator = new OverloadErrorRateAndLatencyEstimator();
     this.mlScalingHandler = MLScalingHandler.getInstance();
   }
 
@@ -106,8 +106,10 @@ export default class LoadSimulationHandler {
       the number of replicas, and per-replica throughput capacity. Then combine 
       with base error rate to calculate the adjusted error rate per endpoint, per timeSlot.
     */
-    this.overloadErrorRateEstimator.adjustedErrorRateByOverload(
+    this.overloadErrorRateAndLatencyEstimator.adjustedErrorRateAndLatencyByOverload(
       loadSimulationSettings.config.overloadErrorRateIncreaseFactor,
+      loadSimulationSettings.config.overloadLatencyIncreaseFactor,
+      loadSimulationSettings.config.overloadLatencyAmplifier,
       propagationResultsWithBasicError,
       metricsPerTimeSlotMap
     )

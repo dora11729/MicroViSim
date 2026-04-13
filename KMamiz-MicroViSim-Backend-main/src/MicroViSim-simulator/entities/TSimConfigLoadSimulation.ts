@@ -26,10 +26,24 @@ export const loadSimulationConfigSchema = z.object({
       message: "Invalid overloadErrorRateIncreaseFactor. It must be between 0 and 10.",
     })
     .default(3),
+  overloadLatencyIncreaseFactor: z
+    .number()
+    .refine((val) => val >= 0 && val <= 10, {
+      message: "Invalid overloadLatencyIncreaseFactor. It must be between 0 and 10.",
+    })
+    .default(5),
+  overloadLatencyAmplifier: z
+    .number()
+    .refine((val) => val >= 0 && val <= 10, {
+      message: "Invalid overloadLatencyAmplifier. It must be between 0 and 10.",
+    })
+    .default(3),
   // TODO: May expand with additional config options such as chaosMonkeyEnabled, errorRateAmplificationFactor, etc^_^.
 }).strict().default({
   simulationDurationInDays: 1,
   overloadErrorRateIncreaseFactor: 3,
+  overloadLatencyIncreaseFactor: 5,
+  overloadLatencyAmplifier: 3,
 });
 
 

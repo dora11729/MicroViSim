@@ -4,9 +4,11 @@ import {
 import { TCMetricsPerTimeSlot } from "../../entities/TLoadSimulation";
 import SimulatorUtils from "../SimulatorUtils";
 
-export default class OverloadErrorRateEstimator {
-  adjustedErrorRateByOverload(
+export default class OverloadErrorRateAndLatencyEstimator {
+  adjustedErrorRateAndLatencyByOverload(
     overloadErrorRateIncreaseFactor: number,
+    overloadLatencyIncreaseFactor: number,
+    overloadLatencyAmplifier: number,
     propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>,
   ) {
@@ -22,7 +24,7 @@ export default class OverloadErrorRateEstimator {
       const metricsInThisTimeSlot = metricsPerTimeSlotMap.get(timeSlotKey);
       if (metricsInThisTimeSlot) {
         const errorRateMapThisSlot = metricsInThisTimeSlot.getEndpointErrorRateMap();
-
+        
         for (const [uniqueEndpointName, baseErrorRate] of errorRateMapThisSlot.entries()) {
           const uniqueServiceName = SimulatorUtils.extractUniqueServiceNameFromEndpointName(uniqueEndpointName);
 
@@ -47,7 +49,21 @@ export default class OverloadErrorRateEstimator {
             overloadErrorRateIncreaseFactor
           });
 
+          const latencyMultiplier = this.estimateLatencyMultiplierWithServiceOverload({
+            requestCountPerSecond,
+            replicaCount,
+            replicaMaxRPS,
+            overloadLatencyAmplifier,
+            overloadLatencyIncreaseFactor
+          });
+
           metricsInThisTimeSlot.setEndpointErrorRate(uniqueEndpointName, adjustedErrorRate);
+
+          const currentDelay = metricsInThisTimeSlot.getEndpointDelay(uniqueEndpointName);
+          metricsInThisTimeSlot.setEndpointDelay(uniqueEndpointName, {
+            latencyMs: currentDelay.latencyMs * latencyMultiplier,
+            jitterMs: currentDelay.jitterMs, // or apply the same multiplier to jitter if you want to increase jitter as well
+          });
         }
 
       }
@@ -141,4 +157,35 @@ export default class OverloadErrorRateEstimator {
     return Math.min(1, totalErrorRate);
   }
 
+  private estimateLatencyMultiplierWithServiceOverload(data: {
+    requestCountPerSecond: number,
+    replicaCount: number,
+    replicaMaxRPS: number,
+    overloadLatencyAmplifier: number, // Maximum latency amplifier (max = (1 + amplifier)x)
+    overloadLatencyIncreaseFactor: number,
+  }): number {
+    const capacity = data.replicaCount * data.replicaMaxRPS; // Total system processing capacity (requests per second)
+
+    if (capacity === 0) {
+      // If there's no capacity, the service cannot handle any request.
+      // Consider this as a full failure (100% error rate).
+      return 1;
+    }
+
+    const utilization = data.requestCountPerSecond / capacity; // System utilization (load ratio)
+
+
+    if (utilization <= 1) {
+      // When the system is not overloaded, the latency multiplier remains at 1.
+      return 1;
+    }
+
+    const overloadFactor = utilization - 1; // Overload ratio (the portion where utilization exceeds 1)
+
+    // Additional latency caused by overload, calculated using an exponential model.
+    // (TODO)This is a temporary value; a more realistic latency model applicable to real scenarios will be tested and applied in the future.
+    const serviceOverloadLatencyMultiplier = 1 + data.overloadLatencyAmplifier * (1 - Math.exp(-data.overloadLatencyIncreaseFactor * overloadFactor));
+
+    return serviceOverloadLatencyMultiplier;
+  }
 }
