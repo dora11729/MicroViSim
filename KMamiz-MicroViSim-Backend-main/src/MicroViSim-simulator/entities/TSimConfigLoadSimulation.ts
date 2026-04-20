@@ -63,8 +63,14 @@ export const simulationServiceVersionScalingSchema = z.object({
   scaleDownThreshold: z.number()
     .min(0.01, {message: "scaleDownThreshold must be at least 0.01."})
     .max(1, { message: "scaleDownThreshold cannot exceed 1." }),
-  maxScaleCounts: z.number().min(1, {message: "maxScaleCounts must be at least 1."}),
-}).strict();
+  maxScaleStep: z.number().min(1, {message: "maxScaleStep must be at least 1."}),
+  maxReplicas: z.number().min(1, {message: "maxReplicas must be at least 1."}),
+}).strict().default({
+  scaleUpThreshold: 0.75,
+  scaleDownThreshold: 0.2,
+  maxScaleStep: 2,
+  maxReplicas: 10,
+});
 
 export const simulationServiceVersionMetricSchema = z.object({
   uniqueServiceName: z.string().optional(),// Users do not need to provide this.

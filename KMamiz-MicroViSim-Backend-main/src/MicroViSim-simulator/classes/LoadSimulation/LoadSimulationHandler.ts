@@ -388,18 +388,20 @@ export default class LoadSimulationHandler {
           // model: not null => ML bodel (xgboost, random_forest, lstm) 預測下一個時間點的 request count，再決定是否 scale
           const uniqueServiceName = ver.uniqueServiceName;
           const model = ver.autoScaling.model ?? null;
-          const { scaleUpThreshold, scaleDownThreshold, maxScaleCounts } = ver.autoScaling;
+          const { scaleUpThreshold, scaleDownThreshold, maxScaleStep, maxReplicas } = ver.autoScaling;
+          const lastReplicaCountMap = new Map<string, number>();
 
           for (const timeSlotKey of sortedTimeSlotKeys) {
             const metricsInThisTimeSlot = metricsPerTimeSlotMap.get(timeSlotKey);
-            const serviceCounts = serviceReceivedRequestCount.get(timeSlotKey);
-            if (!metricsInThisTimeSlot || !serviceCounts) continue;
+            const serviceRequestCounts = serviceReceivedRequestCount.get(timeSlotKey);
+            if (!metricsInThisTimeSlot || !serviceRequestCounts) continue;
 
             // Get request count for the service in this hour
-            const requestCountInThisHour = serviceCounts.get(uniqueServiceName) ?? 0;
+            const requestCountInThisHour = serviceRequestCounts.get(uniqueServiceName) ?? 0;
             var requestCountPerSecond = requestCountInThisHour / 3600;
 
-            var replicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
+            const baseReplicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
+            var lastReplicaCount = lastReplicaCountMap.get(uniqueServiceName) ?? baseReplicaCount;
             const replicaMaxRPS = metricsInThisTimeSlot.getServiceCapacityPerReplica(uniqueServiceName);
 
             /*
@@ -407,9 +409,9 @@ export default class LoadSimulationHandler {
             console.log("timeSlotKey=", timeSlotKey)
             console.log("uniqueServiceName=", uniqueServiceName)
             console.log("requestCountPerSecond=", requestCountPerSecond)
-            console.log("replicaCount=", replicaCount)
+            console.log("lastReplicaCount=", lastReplicaCount)
             console.log("replicaMaxRPS=", replicaMaxRPS)
-            console.log("maxScaleCounts=", maxScaleCounts)
+            console.log("maxScaleStep=", maxScaleStep)
             */
 
             // use ML model to predict RPS as requestCountPerSecond
@@ -426,20 +428,20 @@ export default class LoadSimulationHandler {
 
               const predictedRPS = await this.mlScalingHandler.predictNextRPS(
                 model,
-                { replicaCount, requestCountPerSecond, replicaMaxRPS },
+                { replicaCount: lastReplicaCount, requestCountPerSecond, replicaMaxRPS },
                 history ?? undefined
               );
 
               if (predictedRPS !== null) {
                 console.log(`[ML:${model}] `, uniqueServiceName, ` ${timeSlotKey}: original RPS: ${requestCountPerSecond}, predicted: ${predictedRPS}`);
-                
+
                 requestCountPerSecond = predictedRPS;
               }
             }
 
             const desireReplicas = this.computeDesiredReplicas(
               requestCountPerSecond,
-              replicaCount,
+              lastReplicaCount,
               replicaMaxRPS,
               scaleUpThreshold,
               scaleDownThreshold
@@ -447,27 +449,33 @@ export default class LoadSimulationHandler {
 
             // null => 不用動
             if (desireReplicas !== null) {
-              const diffReplicas = desireReplicas - replicaCount;
-              if (diffReplicas > 0) {
-                metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, Math.min(maxScaleCounts, diffReplicas));
-              } else if (diffReplicas < 0) {
-                // at least leave 1
-                const finalDiff = Math.min(maxScaleCounts, -diffReplicas, replicaCount - 1);
-                if (finalDiff > 0) {
-                  metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, finalDiff)
-                }
+              // 把值限制在[min, max]區間內
+              const clampedDesired = Math.min(
+                Math.max(desireReplicas, lastReplicaCount - maxScaleStep),  // scale down 上界(lowerBound)
+                lastReplicaCount + maxScaleStep                              // scale up 上界(upperBound)
+              );
+              // make sure it doesn't exceed maxReplicas and at least 1
+              const finalDesired = Math.min(Math.max(clampedDesired, 1), maxReplicas);
+
+              const diffFromBase = finalDesired - lastReplicaCount;
+              if (diffFromBase > 0) { // scale up
+                metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, diffFromBase);
+              } else if (diffFromBase < 0) {  // scale down
+                metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, -diffFromBase);
               }
             }
 
+
             // ------------------------------------------------
-            replicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
+            const currentReplicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
             dataset.push({
               timeSlotKey,
               service: uniqueServiceName,
               requestCountPerSecond,
-              replicaCount,
+              replicaCount: currentReplicaCount,
               replicaMaxRPS
             });
+            lastReplicaCountMap.set(uniqueServiceName, currentReplicaCount);
             // ------------------------------------------------
 
           }
@@ -535,44 +543,24 @@ export default class LoadSimulationHandler {
     scaleDownThreshold: number
   ): number | null {
 
-    // denominator(分母) = 0 => threshold= NaN
+    // denominator(分母) = 0 => utilization= NaN
     if (replicaMaxRPS == 0 || replicaCount == 0) {
-      //console.log("threshold= NaN, scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
+      //console.log("utilization= NaN, scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
       return null;
     }
 
-    const threshold = requestCountPerSecond / (replicaMaxRPS * replicaCount);
-    const thresholdPerReplica = requestCountPerSecond / replicaMaxRPS
+    const utilization = requestCountPerSecond / (replicaMaxRPS * replicaCount);
+    const rawUtilization = requestCountPerSecond / replicaMaxRPS
 
-    //console.log("threshold=", threshold, ", scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
+    //console.log("utilization=", utilization, ", scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
 
     // desiredReplicas: 剛剛好 高過scaleUpThreshold 或 低過scaleDownThreshold 的replica數
-    if (threshold > scaleUpThreshold) {
-      const desiredReplicas = Math.ceil(thresholdPerReplica / scaleUpThreshold);
-      //console.log("Rule addServiceReplicaCount: desiredReplicas=", desiredReplicas)
+    // Target: utilization just below scaleUpThreshold — stable for both scale-up and scale-down.
+    const desiredReplicas = Math.ceil(rawUtilization / scaleUpThreshold);
+    if ((utilization > scaleUpThreshold) || (replicaCount > 1 && utilization < scaleDownThreshold)) {
+      //console.log("Rule ServiceReplicaCount: desiredReplicas=", desiredReplicas)
 
       return desiredReplicas;
-      /*
-      if (diffReplicas > 0) {
-        metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, Math.min(maxScaleCounts, diffReplicas));
-      }
-        */
-    } else if (replicaCount > 1 && threshold < scaleDownThreshold) {
-      const desiredReplicas = Math.ceil(thresholdPerReplica / scaleDownThreshold)
-      //console.log("Rule subtractServiceReplicaCount: desiredReplicas=", desiredReplicas)
-
-      return desiredReplicas;
-      /*
-      if (diffReplicas > 0) {
-        diffReplicas = Math.min(diffReplicas, maxScaleCounts);
-
-        // at least leave 1
-        const finalDiff = Math.min(diffReplicas, replicaCount - 1);
-        if (finalDiff > 0) {
-          metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, Math.min(maxScaleCounts, diffReplicas))
-        }
-      }
-        */
     }
 
     return null;
