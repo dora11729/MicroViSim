@@ -85,7 +85,7 @@ export default class RiskAnalyzer {
   }
 
   static Probability(data: TCombinedRealtimeData[]) {
-    const reliabilityMetric = this.ReliabilityMetric(data);
+    const reliabilityMetric = this.ReliabilityMetric(data);   // NormRM(S)
     const rawInvokeProbabilityAndErrorRate =
       this.InvokeProbabilityAndErrorRate(data);
 
@@ -96,7 +96,7 @@ export default class RiskAnalyzer {
     const normErr = rawInvokeProbabilityAndErrorRate.map(
       ({ errorRate }) => errorRate * (1 - this.MINIMUM_PROB) + this.MINIMUM_PROB
     );
-    const baseProb = Normalizer.Numbers(
+    const baseProb = Normalizer.Numbers(    // UnbiasedProb(S) 
       normPro.map((p, i) => p * normErr[i]),
       Normalizer.Strategy.Linear,
       this.MINIMUM_PROB
@@ -106,7 +106,7 @@ export default class RiskAnalyzer {
     ]);
 
     const baseProbMap = new Map(baseProb);
-    const rawProb = reliabilityMetric.map(({ uniqueServiceName, norm }) => {
+    const rawProb = reliabilityMetric.map(({ uniqueServiceName, norm }) => {    // Probability(S)
       const prob = baseProbMap.get(uniqueServiceName)!;
       return {
         uniqueServiceName,
