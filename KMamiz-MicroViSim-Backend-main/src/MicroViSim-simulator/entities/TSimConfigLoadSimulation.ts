@@ -34,16 +34,16 @@ export const loadSimulationConfigSchema = z.object({
     .default(5),
   overloadLatencyAmplifier: z
     .number()
-    .refine((val) => val >= 0 && val <= 10, {
-      message: "Invalid overloadLatencyAmplifier. It must be between 0 and 10.",
+    .refine((val) => val >= 0 && val <= 100, {
+      message: "Invalid overloadLatencyAmplifier. It must be between 0 and 100.",
     })
-    .default(3),
+    .default(10),
   // TODO: May expand with additional config options such as chaosMonkeyEnabled, errorRateAmplificationFactor, etc^_^.
 }).strict().default({
   simulationDurationInDays: 1,
   overloadErrorRateIncreaseFactor: 3,
   overloadLatencyIncreaseFactor: 5,
-  overloadLatencyAmplifier: 3,
+  overloadLatencyAmplifier: 10,
 });
 
 
@@ -57,12 +57,12 @@ const autoScalingModels = [
 export const simulationServiceVersionScalingSchema = z.object({
   model: z.enum(autoScalingModels, { message: "model must be one of 'xgboost', 'random_forest', or 'lstm'." })
     .optional(),
-  scaleUpThreshold: z.number()
-    .min(0.01, {message: "scaleUpThreshold must be at least 0.01."})
-    .max(1, { message: "scaleUpThreshold cannot exceed 1." }),
-  scaleDownThreshold: z.number()
-    .min(0.01, {message: "scaleDownThreshold must be at least 0.01."})
-    .max(1, { message: "scaleDownThreshold cannot exceed 1." }),
+  targetUtilization: z.number()
+    .min(0.01, {message: "targetUtilization must be at least 0.01."})
+    .max(1, { message: "targetUtilization cannot exceed 1." }).default(0.7),
+  tolerance: z.number()
+    .min(0.01, {message: "tolerance must be at least 0.01."})
+    .max(1, { message: "tolerance cannot exceed 1." }).default(0.25),
   maxScaleStep: z.number().min(1, {message: "maxScaleStep must be at least 1."}).default(2),
   maxReplicas: z.number().min(1, {message: "maxReplicas must be at least 1."}).default(10),
 }).strict();

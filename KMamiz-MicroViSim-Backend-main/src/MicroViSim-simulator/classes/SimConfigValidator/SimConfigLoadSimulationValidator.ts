@@ -65,6 +65,7 @@ export default class SimConfigLoadSimulationValidator {
             version.uniqueServiceName = uniqueServiceName;
           }
 
+          /*
           if (version.autoScaling) {
             if (version.autoScaling.scaleDownThreshold >= version.autoScaling.scaleUpThreshold) {
               errorMessages.push({
@@ -73,6 +74,7 @@ export default class SimConfigLoadSimulationValidator {
               });
             }
           }
+            */
         })
       })
     });

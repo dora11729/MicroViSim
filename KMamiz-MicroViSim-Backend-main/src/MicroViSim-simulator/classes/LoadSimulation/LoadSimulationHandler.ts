@@ -363,8 +363,6 @@ export default class LoadSimulationHandler {
 
   /*
     判斷service是否開啟autoScaling，有的話判斷是否進行scale
-     grater than scaleUPThreshold => 產能不足
-     less than scaleDownThreshold => 產能太足
   */
   private async applyAutoScalingForTimeSlot(
     propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
@@ -388,7 +386,7 @@ export default class LoadSimulationHandler {
           // model: not null => ML bodel (xgboost, random_forest, lstm) 預測下一個時間點的 request count，再決定是否 scale
           const uniqueServiceName = ver.uniqueServiceName;
           const model = ver.autoScaling.model ?? null;
-          const { scaleUpThreshold, scaleDownThreshold, maxScaleStep, maxReplicas } = ver.autoScaling;
+          const { targetUtilization, tolerance, maxScaleStep, maxReplicas } = ver.autoScaling;
           const lastReplicaCountMap = new Map<string, number>();
 
           for (const timeSlotKey of sortedTimeSlotKeys) {
@@ -443,21 +441,21 @@ export default class LoadSimulationHandler {
               requestCountPerSecond,
               lastReplicaCount,
               replicaMaxRPS,
-              scaleUpThreshold,
-              scaleDownThreshold
+              targetUtilization,
+              tolerance
             );
 
             // null => 不用動
             if (desireReplicas !== null) {
               // 把值限制在[min, max]區間內
+              // make sure it doesn't exceed maxReplicas and at least 1
               const clampedDesired = Math.min(
-                Math.max(desireReplicas, lastReplicaCount - maxScaleStep),  // scale down 上界(lowerBound)
+                Math.max(desireReplicas, lastReplicaCount - maxScaleStep, 1),  // scale down 上界(lowerBound)
                 lastReplicaCount + maxScaleStep                              // scale up 上界(upperBound)
               );
-              // make sure it doesn't exceed maxReplicas and at least 1
-              const finalDesired = Math.min(Math.max(clampedDesired, 1), maxReplicas);
+              const finalDesired = Math.min(clampedDesired, maxReplicas);
 
-              const diffFromBase = finalDesired - lastReplicaCount;
+              const diffFromBase = finalDesired - baseReplicaCount;
               if (diffFromBase > 0) { // scale up
                 metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, diffFromBase);
               } else if (diffFromBase < 0) {  // scale down
@@ -536,35 +534,27 @@ export default class LoadSimulationHandler {
   // return desiredReplicas
   // 之後test好 可以再整理一下(刪掉註解)
   private computeDesiredReplicas(
-    requestCountPerSecond: number,
-    replicaCount: number,
-    replicaMaxRPS: number,
-    scaleUpThreshold: number,
-    scaleDownThreshold: number
-  ): number | null {
+  requestCountPerSecond: number,
+  replicaCount: number,
+  replicaMaxRPS: number,
+  targetUtilization: number,
+  tolerance: number = 0.1     // 容忍區間
+): number | null {
+  if (replicaMaxRPS === 0 || replicaCount === 0) return null;
 
-    // denominator(分母) = 0 => utilization= NaN
-    if (replicaMaxRPS == 0 || replicaCount == 0) {
-      //console.log("utilization= NaN, scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
-      return null;
-    }
+  const utilization = requestCountPerSecond / (replicaMaxRPS * replicaCount);
+  const desiredReplicas = Math.ceil(
+    requestCountPerSecond / (replicaMaxRPS * targetUtilization)
+  );
 
-    const utilization = requestCountPerSecond / (replicaMaxRPS * replicaCount);
-    const rawUtilization = requestCountPerSecond / replicaMaxRPS
-
-    //console.log("utilization=", utilization, ", scaleUpThreshold=", scaleUpThreshold, ", scaleDownThreshold=", scaleDownThreshold)
-
-    // desiredReplicas: 剛剛好 高過scaleUpThreshold 或 低過scaleDownThreshold 的replica數
-    // Target: utilization just below scaleUpThreshold — stable for both scale-up and scale-down.
-    const desiredReplicas = Math.ceil(rawUtilization / scaleUpThreshold);
-    if ((utilization > scaleUpThreshold) || (replicaCount > 1 && utilization < scaleDownThreshold)) {
-      //console.log("Rule ServiceReplicaCount: desiredReplicas=", desiredReplicas)
-
-      return desiredReplicas;
-    }
-
-    return null;
+  // 只有在超出 tolerance 範圍才動作（避免微小抖動觸發 scaling）
+  const ratio = utilization / targetUtilization;
+  if (ratio > 1 + tolerance || (replicaCount > 1 && ratio < 1 - tolerance)) {
+    return desiredReplicas;
   }
+
+  return null;
+}
 
   private timeSlotKeyToMinutes(timeSlotKey: string): number {
     const [day, hour, minute] = timeSlotKey.split("-").map(Number);
