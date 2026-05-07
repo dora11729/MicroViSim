@@ -5,6 +5,7 @@ import { makeStyles } from "@mui/styles";
 import {
   useState,
   useEffect,
+  useRef,
 } from "react";
 import SimulationService from "../../services/SimulationService";
 import DataService from "../../services/DataService";
@@ -35,13 +36,13 @@ const useStyles = makeStyles(() => ({
   buttonGroups: {
     height: '3em',
     display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
+    gridTemplateColumns: 'repeat(3, 1fr)',
     gap: '1em',
     padding: '1em',
     minHeight: '4.2em',
   },
   fullWidthButton: {
-    gridColumn: 'span 2',
+    gridColumn: '1 / -1',
   },
   button: {
     textTransform: 'none',
@@ -99,6 +100,9 @@ export default function SimulatorHome() {
   const rwdWidth = 1200;
   const [isInSmallScreen, setIsInSmallScreen] = useState<boolean>(true);
 
+  // For file input
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   /***useEffect for window size control***/
   useEffect(() => {
     const unsubscribe = [
@@ -133,7 +137,7 @@ export default function SimulatorHome() {
       });
       return;
     }
-    
+
     // console.log(`handleStartSimulateClick 開始計算總執行時間`);
     // const startTime = performance.now();
     setLoading(true);
@@ -348,6 +352,49 @@ export default function SimulatorHome() {
     </Card>
   );
 
+  const handleUploadDatasetClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // 清空 input，讓同一個檔案可以重複上傳
+    e.target.value = "";
+
+    const result = await SwalHandler.fire({
+      icon: 'warning',
+      title: 'Upload training dataset?',
+      text: `File: ${file.name}`,
+      showCancelButton: true,
+      confirmButtonText: 'Confirm',
+      confirmButtonColor: '#d33',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
+    setLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      // 替換成你實際的 API endpoint
+      const { isSuccess, message } = await SimulationService.getInstance().uploadTrainingDataset(formData);
+
+      if (isSuccess) {
+        await SwalHandler.fire({ icon: 'success', title: 'Upload successful!' });
+      } else {
+        await SwalHandler.fire({ icon: 'error', title: 'Upload failed', text: message });
+      }
+    } catch (error) {
+      await SwalHandler.fire({ icon: 'error', title: 'Unexpected Error', text: String(error) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className={classes.container}>
       <div
@@ -384,6 +431,23 @@ export default function SimulatorHome() {
               >
                 {loading ? 'Loading...' : 'Clone Data from KMamiz '}
               </Button>
+              <Button
+                variant="contained"
+                color="success"
+                onClick={handleUploadDatasetClick}
+                disabled={loading}
+                className={classes.button}
+              >
+                {loading ? 'Loading...' : 'Upload Training Dataset'}
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.json"
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+              />
+
               {/* <Button
                 variant="contained"
                 color="error"

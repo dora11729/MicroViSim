@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from services.predict import router as predict_router
 from services.model_loader import load_all_models
+from services.train import router as train_router
 from dotenv import load_dotenv
 import os
 
@@ -21,3 +22,4 @@ app = FastAPI(
 )
 
 app.include_router(predict_router)
+app.include_router(train_router)

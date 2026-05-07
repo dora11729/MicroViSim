@@ -3,14 +3,32 @@ import numpy as np
 from pathlib import Path
 import tensorflow as tf
 
-MODEL_DIR = Path(__file__).parent.parent / "models"
+MODEL_DIR   = Path(__file__).parent.parent / "models"
+BASE_DIR    = MODEL_DIR / "base"        # 基底模型（不動）
+FINETUNE_DIR = MODEL_DIR / "finetuned"  # 訓練後覆蓋這裡
+DATASET_DIR = MODEL_DIR / "dataset"
+
+FINETUNE_DIR.mkdir(parents=True, exist_ok=True)
+DATASET_DIR.mkdir(parents=True, exist_ok=True)
 
 _models = {}
 
+def _load_model_file(filename: str):
+    """優先用 finetuned，沒有才用 base"""
+    finetuned_path = FINETUNE_DIR / filename
+    base_path      = BASE_DIR / filename
+    if finetuned_path.exists():
+        return finetuned_path
+    elif base_path.exists():
+        return base_path
+    return None
+
 def load_all_models():
+    _models.clear()
+
     # XGBoost
-    xgb_path = MODEL_DIR / "xgb_model.json"
-    if xgb_path.exists():
+    xgb_path = _load_model_file("xgb_model.json")
+    if xgb_path:
         import xgboost as xgb
         m = xgb.XGBRegressor()
         m.load_model(str(xgb_path))
@@ -20,17 +38,17 @@ def load_all_models():
         print("[ModelLoader] ⚠️  Not found: xgb_model.json")
 
     # RandomForest
-    rf_path = MODEL_DIR / "random_forest_model.joblib"
-    if rf_path.exists():
+    rf_path = _load_model_file("random_forest_model.joblib")
+    if rf_path:
         _models["random_forest"] = joblib.load(rf_path)
         print("[ModelLoader] ✅ Loaded: random_forest")
     else:
         print("[ModelLoader] ⚠️  Not found: random_forest_model.joblib")
 
     # LSTM + preprocessor
-    lstm_path   = MODEL_DIR / "lstm_model.keras"
-    preproc_path = MODEL_DIR / "lstm_preprocess.pkl"
-    if lstm_path.exists() and preproc_path.exists():
+    lstm_path   = _load_model_file("lstm_model.keras")
+    preproc_path = _load_model_file("lstm_preprocess.pkl")
+    if lstm_path and preproc_path:
         _models["lstm_model"]   = tf.keras.models.load_model(str(lstm_path))
         _models["lstm_preproc"] = joblib.load(preproc_path)
         # lstm_preproc 包含: { scaler, features, window_size }

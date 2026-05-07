@@ -46,4 +46,21 @@ export default class SimulationService {
       message: 'Error while trying to fetching static Simulation Yaml, Please check the response details for more information.'
     };
   }
+
+  async uploadTrainingDataset(formData: FormData): Promise<{ isSuccess: boolean; message: string }> {
+  try {
+    const res = await fetch(`${this.prefix}/uploadDataset`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (res.ok) {
+      return { isSuccess: true, message: 'ok' };
+    } else {
+      const text = await res.text();
+      return { isSuccess: false, message: text };
+    }
+  } catch (error) {
+    return { isSuccess: false, message: String(error) };
+  }
+}
 }
