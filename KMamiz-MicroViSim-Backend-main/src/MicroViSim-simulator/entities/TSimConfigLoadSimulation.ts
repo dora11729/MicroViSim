@@ -34,8 +34,8 @@ export const loadSimulationConfigSchema = z.object({
     .default(5),
   overloadLatencyAmplifier: z
     .number()
-    .refine((val) => val >= 0 && val <= 100, {
-      message: "Invalid overloadLatencyAmplifier. It must be between 0 and 100.",
+    .refine((val) => val >= 0, {
+      message: "Invalid overloadLatencyAmplifier. It must be at least 1",
     })
     .default(10),
   // TODO: May expand with additional config options such as chaosMonkeyEnabled, errorRateAmplificationFactor, etc^_^.
