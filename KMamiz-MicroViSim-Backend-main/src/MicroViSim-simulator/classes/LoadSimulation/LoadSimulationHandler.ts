@@ -445,22 +445,21 @@ export default class LoadSimulationHandler {
               tolerance
             );
 
-            // null => 不用動
-            if (desireReplicas !== null) {
-              // 把值限制在[min, max]區間內
-              // make sure it doesn't exceed maxReplicas and at least 1
-              const clampedDesired = Math.min(
-                Math.max(desireReplicas, lastReplicaCount - maxScaleStep, 1),  // scale down 上界(lowerBound)
-                lastReplicaCount + maxScaleStep                              // scale up 上界(upperBound)
-              );
-              const finalDesired = Math.min(clampedDesired, maxReplicas);
+            // console.log(`[Auto-scaling] ${uniqueServiceName} at ${timeSlotKey}: RPS=${requestCountPerSecond.toFixed(2)}, smoothed RPS=${smoothedRPS.toFixed(2)}, desiredReplicas=${desireReplicas}, currentReplicas=${lastReplicaCount}`);
 
-              const diffFromBase = finalDesired - baseReplicaCount;
-              if (diffFromBase > 0) { // scale up
-                metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, diffFromBase);
-              } else if (diffFromBase < 0) {  // scale down
-                metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, -diffFromBase);
-              }
+            // 把值限制在[min, max]區間內
+            // make sure it doesn't exceed maxReplicas and at least 1
+            const finalDesired = Math.min(
+              Math.max(desireReplicas, lastReplicaCount - maxScaleStep, 1),  // scale down 上界(lowerBound)
+              lastReplicaCount + maxScaleStep,                              // scale up 上界(upperBound)
+              maxReplicas
+            );
+
+            const diffFromBase = finalDesired - baseReplicaCount;
+            if (diffFromBase > 0) { // scale up
+              metricsInThisTimeSlot.addServiceReplicaCount(uniqueServiceName, diffFromBase);
+            } else if (diffFromBase < 0) {  // scale down
+              metricsInThisTimeSlot.subtractServiceReplicaCount(uniqueServiceName, -diffFromBase);
             }
 
 
@@ -534,27 +533,28 @@ export default class LoadSimulationHandler {
   // return desiredReplicas
   // 之後test好 可以再整理一下(刪掉註解)
   private computeDesiredReplicas(
-  requestCountPerSecond: number,
-  replicaCount: number,
-  replicaMaxRPS: number,
-  targetUtilization: number,
-  tolerance: number = 0.1     // 容忍區間
-): number | null {
-  if (replicaMaxRPS === 0 || replicaCount === 0) return null;
+    requestCountPerSecond: number,
+    currentReplicas: number,
+    replicaMaxRPS: number,
+    targetUtilization: number,
+    tolerance: number = 0.1     // 容忍區間
+  ): number {
+    if (replicaMaxRPS === 0 || currentReplicas === 0) return 1;
 
-  const utilization = requestCountPerSecond / (replicaMaxRPS * replicaCount);
-  const desiredReplicas = Math.ceil(
-    requestCountPerSecond / (replicaMaxRPS * targetUtilization)
-  );
+    const utilization = requestCountPerSecond / (replicaMaxRPS * currentReplicas);
+    const desiredReplicas = Math.ceil(
+      requestCountPerSecond / (replicaMaxRPS * targetUtilization)
+    );
 
-  // 只有在超出 tolerance 範圍才動作（避免微小抖動觸發 scaling）
-  const ratio = utilization / targetUtilization;
-  if (ratio > 1 + tolerance || (replicaCount > 1 && ratio < 1 - tolerance)) {
-    return desiredReplicas;
+    // 只有在超出 tolerance 範圍才動作（避免微小抖動觸發 scaling）
+    const ratio = utilization / targetUtilization;
+
+    if (ratio > 1 + tolerance || (currentReplicas > 1 && ratio < 1 - tolerance)) {
+      return desiredReplicas;
+    }
+
+    return currentReplicas;
   }
-
-  return null;
-}
 
   private timeSlotKeyToMinutes(timeSlotKey: string): number {
     const [day, hour, minute] = timeSlotKey.split("-").map(Number);

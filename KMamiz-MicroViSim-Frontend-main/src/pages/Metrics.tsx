@@ -92,6 +92,7 @@ export default function Metrics() {
       { name: "RequestErrors", field: "requestErrors" },
       { name: "Service Errors", field: "serverErrors" },
       { name: "Latency (Coefficient of Variation)", field: "latencyCV" },
+      { name: "latencyMean", field: "latencyMean" },
       { name: "Replicas", field: "replicas" },
     ];
 

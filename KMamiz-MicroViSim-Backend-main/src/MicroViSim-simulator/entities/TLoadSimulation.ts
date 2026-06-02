@@ -26,7 +26,7 @@ export type TEndpointPropagationStatsForOneTimeSlot = {
   ownErrorCount: number;        // Number of errors originating from the endpointNode itself
   downstreamErrorCount: number; // Number of errors caused by downstream endpointNodes
   latencyStatsByStatus: Map<string, { mean: number; cv: number }>; //Key: status code, Value: latency statistics (mean and coefficient of variation) for all requests with this status code
-
+  // latencyBreakdown: TLatencyBreakdown; // Latency breakdown considering the influence of error rates, used for more accurate latency estimation under overload conditions
 };
 
 
@@ -50,7 +50,16 @@ export type TTargetWithCallProbability = {
 */
 export type TDependOnMapWithCallProbability = Map<string, TTargetWithCallProbability[][]>;
 
-
+/*
+// 知道latency、上下游、error rate 間的相互影響
+export type TLatencyBreakdown = {
+  successMeanLatency: number;   // status=200 的平均 latency（成功路徑，含下游）
+  failMeanLatency: number;      // status=500 的平均 latency（失敗路徑，只有 own）
+  ownErrorRate: number;         // ownErrorCount / requestCount
+  downstreamErrorRate: number;  // downstreamErrorCount / requestCount
+  overallMeanLatency: number;   // 加權平均（原本的那個值）
+};
+*/
 
 /* 
   TCMetricsPerTimeSlot records the dynamic characteristics of each service and endpoint during a specific time slot,
