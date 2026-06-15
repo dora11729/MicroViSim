@@ -87,13 +87,74 @@ export const simulationNamespaceServiceMetricsSchema = z.object({
   services: z.array(simulationServiceMetricSchema),
 }).strict();
 
-const endpointDelaySchema = z.object({
-  latencyMs: z.number().min(0, { message: "latencyMs must be zero or greater." }).default(0),
-  jitterMs: z.number().min(0, { message: "jitterMs must be zero or greater." }).default(0),
-}).strict().default({
-  latencyMs: 0,
-  jitterMs: 0,
+const baseDelaySchema = z.object({
+  latencyMs: z.number().min(0, {
+    message: "latencyMs must be zero or greater.",
+  }).default(0),
+  jitterMs: z.number().min(0, {
+    message: "jitterMs must be zero or greater.",
+  }).default(0),
 });
+
+const stableDelaySchema = baseDelaySchema.extend({
+  type: z.literal("stable", {
+    message: "type must be stable, spike, jitter, gradualDrift or loadDriven.",
+  }),
+});
+
+const jitterDelaySchema = baseDelaySchema.extend({
+  type: z.literal("jitter", {
+    message: "type must be stable, spike, jitter, gradualDrift or loadDriven.",
+  }),
+});
+
+const spikeDelaySchema = baseDelaySchema.extend({
+  type: z.literal("spike", {
+    message: "type must be stable, spike, jitter, gradualDrift or loadDriven.",
+  }),
+  spikeProbability: z.number()
+    .refine((val) => val >= 0 && val <= 1, {
+      message: "Invalid spikeProbability. It must be between 0 and 1.",
+    })
+    .default(0.1),
+  spikeMagnitude: z.number().min(1, {
+    message: "spikeMagnitude must be at least 1.",
+  }).default(5),
+  spikeDuration: z.number()
+    .int({ message: "spikeDuration must be an integer." })
+    .min(1, { message: "spikeDuration must be at least 1." })
+    .default(1),
+});
+
+const gradualDriftDelaySchema = baseDelaySchema.extend({
+  type: z.literal("gradualDrift", {
+    message: "type must be stable, spike, jitter, gradualDrift or loadDriven.",
+  }),
+  driftRate: z.number().min(0, {
+    message: "driftRate must be zero or greater.",
+  }).default(4),
+  maxLatencyMs: z.number().min(0, {
+    message: "maxLatencyMs must be zero or greater.",
+  }).default(30000),
+});
+
+const loadDrivenDelaySchema = baseDelaySchema.extend({
+  type: z.literal("loadDriven", {
+    message: "type must be stable, spike, jitter, gradualDrift or loadDriven.",
+  }),
+});
+
+const singleDelaySchema = z.discriminatedUnion("type", [
+  stableDelaySchema,
+  jitterDelaySchema,
+  spikeDelaySchema,
+  gradualDriftDelaySchema,
+  loadDrivenDelaySchema,
+]).default({ type: "stable" });
+
+const endpointDelaySchema = z.array(singleDelaySchema)
+  .min(1, { message: "delay must have at least one entry." })
+  .default([{ type: "stable" }]);
 
 
 
@@ -141,6 +202,6 @@ export type TSimulationServiceVersionScalingSchema = z.infer<typeof simulationSe
 export type TSimulationServiceVersionMetric = z.infer<typeof simulationServiceVersionMetricSchema>;
 export type TSimulationServiceMetric = z.infer<typeof simulationServiceMetricSchema>;
 export type TSimulationNamespaceServiceMetrics = z.infer<typeof simulationNamespaceServiceMetricsSchema>;
-export type TSimulationEndpointDelay = z.infer<typeof endpointDelaySchema>;
+export type TSimulationEndpointDelay = z.infer<typeof singleDelaySchema>;
 export type TSimulationEndpointMetric = z.infer<typeof simulationEndpointMetricSchema>;
 export type TLoadSimulationSettings = z.infer<typeof loadSimulationSchema>;

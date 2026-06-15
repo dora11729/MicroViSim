@@ -162,7 +162,11 @@ export default class SimConfigLoadSimulationPreprocessor {
     const missingEndpointIds = Array.from(allDefinedEndpointIds).filter(id => !existingMetricEndpointIds.has(id));
     const defaultMetrics: TSimulationEndpointMetric[] = missingEndpointIds.map(id => ({
       endpointId: id,
-      delay: { latencyMs: 0, jitterMs: 0 },
+      delay: [{
+        type: "stable",
+        latencyMs: 0,
+        jitterMs: 0,
+      }],
       expectedExternalDailyRequestCount: 0,
       errorRatePercent: 0,
       fallbackStrategy: "failIfAnyDependentFail" as TFallbackStrategy,

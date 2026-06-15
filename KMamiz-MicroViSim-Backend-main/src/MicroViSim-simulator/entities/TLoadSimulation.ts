@@ -75,7 +75,7 @@ export class TCMetricsPerTimeSlot {
   // Aggregates endpoint latency data during the current time slot
   // key: uniqueEndpointName
   // value: An object containing latencyMs and jitterMs
-  private _endpointDelayMap: Map<string, TSimulationEndpointDelay>;
+  private _endpointDelayMap: Map<string, TSimulationEndpointDelay[]>;
 
   // Aggregates the error rates of endpoints during the current time slot
   // key: uniqueEndpointName
@@ -95,7 +95,7 @@ export class TCMetricsPerTimeSlot {
   constructor() {
     this._entryPointRequestCountMap = new Map<string, number>();
     this._serviceReplicaCountMap = new Map<string, number>();
-    this._endpointDelayMap = new Map<string, TSimulationEndpointDelay>();
+    this._endpointDelayMap = new Map<string, TSimulationEndpointDelay[]>();
     this._endpointErrorRate = new Map<string, number>();
     this._serviceCapacityPerReplicaMap = new Map<string, number>();
   }
@@ -104,11 +104,15 @@ export class TCMetricsPerTimeSlot {
   setEntryPointRequestCount(uniqueEndpointName: string, count: number): void {
     this._entryPointRequestCountMap.set(uniqueEndpointName, Math.max(0, count));
   }
-  setEndpointDelay(uniqueEndpointName: string, delay: TSimulationEndpointDelay): void {
-    this._endpointDelayMap.set(uniqueEndpointName, {
-      latencyMs: Math.max(0, delay.latencyMs),
-      jitterMs: Math.max(0, delay.jitterMs),
-    });
+  setEndpointDelay(uniqueEndpointName: string, delay: Partial<Pick<TSimulationEndpointDelay, 'latencyMs' | 'jitterMs'>>): void {
+    const current = this.getEndpointDelay(uniqueEndpointName);
+    const first = current[0];
+    current[0] = {
+      ...first,
+      latencyMs: Math.max(0, delay.latencyMs ?? first.latencyMs),
+      jitterMs: Math.max(0, delay.jitterMs ?? first.jitterMs),
+    };
+    this._endpointDelayMap.set(uniqueEndpointName, current);
   }
   setEndpointErrorRate(uniqueEndpointName: string, errorRate: number): void {
     this._endpointErrorRate.set(uniqueEndpointName, Math.max(0, errorRate));
@@ -124,7 +128,7 @@ export class TCMetricsPerTimeSlot {
   setEntryPointRequestCountMap(newMap: Map<string, number>): void {
     this._entryPointRequestCountMap = new Map(newMap);
   }
-  setEndpointDelayMap(newMap: Map<string, TSimulationEndpointDelay>): void {
+  setEndpointDelayMap(newMap: Map<string, TSimulationEndpointDelay[]>): void {
     this._endpointDelayMap = new Map(newMap);
   }
   setEndpointErrorRateMap(newMap: Map<string, number>): void {
@@ -141,8 +145,14 @@ export class TCMetricsPerTimeSlot {
   getEntryPointRequestCount(uniqueEndpointName: string): number {
     return this._entryPointRequestCountMap.get(uniqueEndpointName) ?? 0;
   }
-  getEndpointDelay(uniqueEndpointName: string): TSimulationEndpointDelay {
-    const defaultDelay: TSimulationEndpointDelay = { latencyMs: 0, jitterMs: 0 };
+  getEndpointDelay(uniqueEndpointName: string): TSimulationEndpointDelay[] {
+    const defaultDelay: TSimulationEndpointDelay[] = [
+      {
+        type: "stable",
+        latencyMs: 0,
+        jitterMs: 0,
+      }
+    ]
     return this._endpointDelayMap.get(uniqueEndpointName) ?? defaultDelay;
   }
   getEndpointErrorRate(uniqueEndpointName: string): number {
@@ -160,7 +170,7 @@ export class TCMetricsPerTimeSlot {
     return new Map(this._entryPointRequestCountMap);
   }
 
-  getEndpointDelayMap(): Map<string, TSimulationEndpointDelay> {
+  getEndpointDelayMap(): Map<string, TSimulationEndpointDelay[]> {
     return new Map(this._endpointDelayMap);
   }
   getEndpointErrorRateMap(): Map<string, number> {
@@ -184,12 +194,15 @@ export class TCMetricsPerTimeSlot {
     this.setEntryPointRequestCount(uniqueEndpointName, current * factor);
   }
 
-  addEndpointDelay(uniqueEndpointName: string, delta: TSimulationEndpointDelay): void {
+  addEndpointDelay(uniqueEndpointName: string, delta: Partial<Pick<TSimulationEndpointDelay, 'latencyMs' | 'jitterMs'>>): void {
     const current = this.getEndpointDelay(uniqueEndpointName);
-    this.setEndpointDelay(uniqueEndpointName, {
-      latencyMs: current.latencyMs + delta.latencyMs,
-      jitterMs: current.jitterMs + delta.jitterMs,
-    });
+    const first = current[0];
+    current[0] = {
+      ...first,
+      latencyMs: Math.max(0, first.latencyMs + (delta.latencyMs ?? 0)),
+      jitterMs: Math.max(0, first.jitterMs + (delta.jitterMs ?? 0)),
+    };
+    this._endpointDelayMap.set(uniqueEndpointName, current);
   }
 
   addEndpointErrorRate(uniqueEndpointName: string, delta: number): void {
@@ -200,12 +213,12 @@ export class TCMetricsPerTimeSlot {
   addServiceReplicaCount(uniqueServiceName: string, delta: number): void {
     const current = this.getServiceReplicaCount(uniqueServiceName);
     this.setServiceReplicaCount(uniqueServiceName, current + delta);
-    console.log("addServiceReplicaCount => delta: ", delta, "before: ", current, "after: ", this.getServiceReplicaCount(uniqueServiceName));
+    // console.log("addServiceReplicaCount => delta: ", delta, "before: ", current, "after: ", this.getServiceReplicaCount(uniqueServiceName));
   }
   subtractServiceReplicaCount(uniqueServiceName: string, delta: number): void {
     const current = this.getServiceReplicaCount(uniqueServiceName);
     this.setServiceReplicaCount(uniqueServiceName, current - delta);
-    console.log("subtractServiceReplicaCount => delta: ", delta, "before: ", current, "after: ", this.getServiceReplicaCount(uniqueServiceName));
+    // console.log("subtractServiceReplicaCount => delta: ", delta, "before: ", current, "after: ", this.getServiceReplicaCount(uniqueServiceName));
   }
 
   addServiceCapacityPerReplica(uniqueServiceName: string, delta: number): void {

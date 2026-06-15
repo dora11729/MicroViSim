@@ -9,6 +9,7 @@ import SimulatorUtils from "../SimulatorUtils";
 import { TCMetricsPerTimeSlot, } from "../../entities/TLoadSimulation";
 import { FallbackHandler } from "./FallbackHandler";
 import { TSimulationEndpointMetric } from "../../entities/TSimConfigLoadSimulation";
+import LatencySimulator from "./LatencySimulator";
 export default class LoadSimulationPropagator {
   /*
     Explanation of NO_DEPENDENT_CALL:
@@ -28,6 +29,7 @@ export default class LoadSimulationPropagator {
       so there is a 40% chance that no endpoint in this group will be called (NO_DEPENDENT_CALL).
   */
   private static NO_DEPENDENT_CALL: string = "NO_DEPENDENT_CALL";
+  private latencySimulator = new LatencySimulator();
 
   simulatePropagation(
     endpointMetrics: TSimulationEndpointMetric[],
@@ -48,6 +50,7 @@ export default class LoadSimulationPropagator {
      */
     const fallbackHandler = new FallbackHandler(endpointMetrics);
     const propagationResult: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>> = new Map();
+    this.latencySimulator.resetDrift();
 
     for (const [timeSlotKey, metricsInThisTimeSlot] of metricsPerTimeSlotMap.entries()) {
       const propagationResultAtThisTimeSlot = this.simulatePropagationInSingleTimeSlot(
@@ -57,6 +60,18 @@ export default class LoadSimulationPropagator {
         shouldComputeLatency,
       )
       propagationResult.set(timeSlotKey, propagationResultAtThisTimeSlot);
+
+      if (shouldComputeLatency) {
+        for (const metric of endpointMetrics) {
+          const gradualDriftDelay = metric.delay?.find(d => d.type === "gradualDrift");
+          if (gradualDriftDelay && gradualDriftDelay.type === "gradualDrift") {
+            this.latencySimulator.advanceDrift(
+              metric.uniqueEndpointName ?? "",
+              gradualDriftDelay.driftRate ?? 0,
+            );
+          }
+        }
+      }
     }
 
     return propagationResult;
@@ -65,10 +80,10 @@ export default class LoadSimulationPropagator {
   private simulatePropagationInSingleTimeSlot(
     metricsInThisTimeSlot: TCMetricsPerTimeSlot,
     dependOnMapWithCallProbability: TDependOnMapWithCallProbability,
-    fallbackHandler:FallbackHandler,
+    fallbackHandler: FallbackHandler,
     shouldComputeLatency: boolean
   ): Map<string, TEndpointPropagationStatsForOneTimeSlot> {
-     // key: uniqueEndpointName value: TEndpointPropagationStats for this endpoint
+    // key: uniqueEndpointName value: TEndpointPropagationStats for this endpoint
     const endpointStats = new Map<string, TEndpointPropagationStatsForOneTimeSlot>();
 
 
@@ -108,6 +123,8 @@ export default class LoadSimulationPropagator {
 
       const uniqueServiceName = SimulatorUtils.extractUniqueServiceNameFromEndpointName(uniqueEndpointName);
       const replicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
+      const capacityPerReplica = metricsInThisTimeSlot.getServiceCapacityPerReplica(uniqueServiceName);
+      const capacity = capacityPerReplica * replicaCount;
 
       // If a service has replica = 0, it always reports failure to upstream callers and does not propagate requests downstream.
       if (replicaCount === 0) {
@@ -122,7 +139,7 @@ export default class LoadSimulationPropagator {
         return { statusMap: currentStatus, latencyMap: totalLatencyMap };
       }
       const errorRate = metricsInThisTimeSlot.getEndpointErrorRate(uniqueEndpointName);
-      const delay: TSimulationEndpointDelay = metricsInThisTimeSlot.getEndpointDelay(uniqueEndpointName);
+      const delays: TSimulationEndpointDelay[] = metricsInThisTimeSlot.getEndpointDelay(uniqueEndpointName);
 
       // Simulate this endpointNode’s own error state
       const ownSuccessStatus = new Map<string, boolean>();
@@ -130,7 +147,15 @@ export default class LoadSimulationPropagator {
         const isError = Math.random() < errorRate;
         ownSuccessStatus.set(reqId, !isError);
         currentStatus.set(reqId, !isError);
-        const jitteredLatency = this.getJitteredLatency(delay.latencyMs, delay.jitterMs);
+        // const jitteredLatency = this.getJitteredLatency(delay.latencyMs, delay.jitterMs);
+        const requestCount = filteredRequestIds.length;
+        const jitteredLatency = this.latencySimulator.computeLatency(
+          uniqueEndpointName,
+          delays,
+          requestCount,
+          capacity
+          // metricsInThisTimeSlot.getEntryPointRequestCount(uniqueEndpointName),
+        );
         totalLatencyMap.set(reqId, jitteredLatency); // Default latency starts with own latency
       }
 
@@ -317,12 +342,14 @@ export default class LoadSimulationPropagator {
     return endpointStats;
   }
 
+  /*
   private getJitteredLatency(baseLatency: number, jitterMs: number): number {
     const min = baseLatency - jitterMs;
     const max = baseLatency + jitterMs;
     const jittered = Math.random() * (max - min) + min;
     return Math.max(0, jittered); // Ensure latency is not negative
   }
+  */
 
   // Generate request IDs, format: 'endpoint-0', 'endpoint-1' ...
   private generateRequestIds(uniqueEndpointName: string, count: number): string[] {

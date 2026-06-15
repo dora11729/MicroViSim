@@ -100,6 +100,7 @@ export default class LoadSimulationHandler {
       metricsPerTimeSlotMap
     )
 
+    const serviceReceivedRequestCount = this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithBasicError);
 
     /*
       Estimate overload level for each service based on expected incoming traffic, 
@@ -110,7 +111,8 @@ export default class LoadSimulationHandler {
       loadSimulationSettings.config.overloadErrorRateIncreaseFactor,
       loadSimulationSettings.config.overloadLatencyIncreaseFactor,
       loadSimulationSettings.config.overloadLatencyAmplifier,
-      propagationResultsWithBasicError,
+      // propagationResultsWithBasicError,
+      serviceReceivedRequestCount,
       metricsPerTimeSlotMap
     )
 
@@ -183,7 +185,7 @@ export default class LoadSimulationHandler {
     }
 
     // construct base data maps from simulation config
-    const baseEndpointDelayMap = new Map<string, TSimulationEndpointDelay>();
+    const baseEndpointDelayMap = new Map<string, TSimulationEndpointDelay[]>();
     const baseEndpointErrorRateMap = new Map<string, number>();
     const baseEndpointSimulationReqCountsMap = new Map<string, number[][]>();
     const baseServiceReplicaCountMap = new Map<string, number>(
@@ -195,10 +197,7 @@ export default class LoadSimulationHandler {
       const uniqueEndpointName = metric.uniqueEndpointName!;
 
       // EndpointDelay
-      baseEndpointDelayMap.set(uniqueEndpointName, {
-        latencyMs: metric.delay.latencyMs,
-        jitterMs: metric.delay.jitterMs
-      });
+      baseEndpointDelayMap.set(uniqueEndpointName, metric.delay);
 
       // EndpointErrorRate
       baseEndpointErrorRateMap.set(uniqueEndpointName,

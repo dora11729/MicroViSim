@@ -1,6 +1,3 @@
-import {
-  TEndpointPropagationStatsForOneTimeSlot,
-} from "../../entities/TLoadSimulation";
 import { TCMetricsPerTimeSlot } from "../../entities/TLoadSimulation";
 import SimulatorUtils from "../SimulatorUtils";
 
@@ -9,7 +6,8 @@ export default class OverloadErrorRateAndLatencyEstimator {
     overloadErrorRateIncreaseFactor: number,
     overloadLatencyIncreaseFactor: number,
     overloadLatencyAmplifier: number,
-    propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
+    // propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
+    serviceReceivedRequestCount: Map<string, Map<string, number>>,
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>,
   ) {
 
@@ -18,7 +16,7 @@ export default class OverloadErrorRateAndLatencyEstimator {
       "first time traffic propagation"(propagationResultsWithBasicError).
      */
 
-    const serviceReceivedRequestCount = this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithBasicError);
+    // const serviceReceivedRequestCount = this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithBasicError);
 
     for (const [timeSlotKey, serviceCounts] of serviceReceivedRequestCount.entries()) {
       const metricsInThisTimeSlot = metricsPerTimeSlotMap.get(timeSlotKey);
@@ -40,7 +38,7 @@ export default class OverloadErrorRateAndLatencyEstimator {
           // console.log("timeSlotKey=", timeSlotKey)
           // console.log("uniqueEndpointName=", uniqueEndpointName)
           // console.log("requestCountInThisHour=", requestCountInThisHour)
-          console.log(replicaMaxRPS)
+          // console.log(replicaMaxRPS)
           const adjustedErrorRate = this.estimateErrorRateWithServiceOverload({
             requestCountPerSecond,
             replicaCount,
@@ -59,7 +57,7 @@ export default class OverloadErrorRateAndLatencyEstimator {
 
           metricsInThisTimeSlot.setEndpointErrorRate(uniqueEndpointName, adjustedErrorRate);
 
-          const currentDelay = metricsInThisTimeSlot.getEndpointDelay(uniqueEndpointName);
+          const currentDelay = metricsInThisTimeSlot.getEndpointDelay(uniqueEndpointName)[0];
           metricsInThisTimeSlot.setEndpointDelay(uniqueEndpointName, {
             latencyMs: currentDelay.latencyMs * latencyMultiplier,
             jitterMs: currentDelay.jitterMs, // or apply the same multiplier to jitter if you want to increase jitter as well
@@ -70,6 +68,7 @@ export default class OverloadErrorRateAndLatencyEstimator {
     }
   }
 
+  /*
   private computeRequestCountsPerServicePerTimeSlot(
     propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>
   ): Map<string, Map<string, number>> {
@@ -87,6 +86,7 @@ export default class OverloadErrorRateAndLatencyEstimator {
 
     // Used to store the final statistical results. The key is the timestamp and the value 
     // is the number of requests for each service at that timestamp.
+    /*
     const serviceRequestCountsPerTimeSlot = new Map<string, Map<string, number>>();
 
     for (const [timeSlotKey, timeSlotStats] of propagationResultsWithBasicError.entries()) {
@@ -113,6 +113,7 @@ export default class OverloadErrorRateAndLatencyEstimator {
 
     return serviceRequestCountsPerTimeSlot;
   }
+  */
 
   private estimateErrorRateWithServiceOverload(data: {
     requestCountPerSecond: number,
