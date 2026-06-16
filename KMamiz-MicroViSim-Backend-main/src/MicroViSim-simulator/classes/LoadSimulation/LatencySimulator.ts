@@ -19,9 +19,8 @@ export default class LatencySimulator {
         return { mu, sigma: Math.sqrt(sigma2) };
     }
 
-    /**
-     * AR(1) 自相關：讓相鄰時間點的延遲有連續性
-     * phi = 0.7 是實測微服務的典型值
+    /*
+    Use AR(1) process to smooth the random noise (epsilon) for more realistic latency simulation.
      */
     private applyAR1(endpointName: string, epsilon: number, phi = 0.7): number {
         const prev = this.epsilonState.get(endpointName) ?? 0;
@@ -43,6 +42,7 @@ export default class LatencySimulator {
     computeLatency(
         endpointName: string,
         delays: TSimulationEndpointDelay[],
+        maxLatencyMs: number,
         requestCount: number,
         capacity: number
     ): number {
@@ -68,19 +68,24 @@ export default class LatencySimulator {
             }
         }
 
-        return total;
+        return maxLatencyMs > 0 ? Math.min(total, maxLatencyMs) : total;
     }
 
     private computeStable(
         endpointName: string, 
         mean: number, 
-        std: number
+        std: number,
+        isSmoothed: boolean = true
     ): number {
         if (mean <= 0) return 0;
         const { mu, sigma } = this.toLogNormalParams(mean, Math.max(std, 1));
         // 取樣一個標準常態 epsilon，再套 AR(1)
         const rawEpsilon = (Math.sqrt(-2 * Math.log(Math.random())) *
             Math.cos(2 * Math.PI * Math.random()));
+
+        if (!isSmoothed) {
+            return Math.max(0, Math.exp(mu + sigma * rawEpsilon));
+        }
         const smoothedEpsilon = this.applyAR1(endpointName, rawEpsilon);
         return Math.max(0, Math.exp(mu + sigma * smoothedEpsilon));
     }
@@ -100,7 +105,7 @@ export default class LatencySimulator {
         if (remainingSlots > 0) {
             // 突刺持續中
             this.spikeState.set(endpointName, remainingSlots - 1);
-            return this.computeStable(endpointName, effectiveBase * (spikeMagnitude - 1), jitterMs);
+            return this.computeStable(endpointName, effectiveBase * spikeMagnitude, jitterMs);
         }
 
         // 以機率觸發新突刺
@@ -151,16 +156,13 @@ export default class LatencySimulator {
         delay: TSimulationEndpointDelay,
     ): number {
         if (delay.type !== "gradualDrift") return 0;
-        const { latencyMs, jitterMs, maxLatencyMs } = delay;
+        const { latencyMs, jitterMs } = delay;
 
         const accumulated = this.driftAccumulator.get(endpointName) ?? 0;
 
         const driftedLatency = latencyMs + accumulated;
-        const capped = maxLatencyMs > 0
-            ? Math.min(driftedLatency, maxLatencyMs)
-            : driftedLatency;
 
-        return this.computeStable(endpointName, capped, jitterMs);
+        return this.computeStable(endpointName, driftedLatency, jitterMs, false);
     }
 
     private computeLoadDriven(

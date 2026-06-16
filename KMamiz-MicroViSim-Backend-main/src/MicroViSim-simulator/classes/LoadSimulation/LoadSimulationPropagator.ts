@@ -140,6 +140,7 @@ export default class LoadSimulationPropagator {
       }
       const errorRate = metricsInThisTimeSlot.getEndpointErrorRate(uniqueEndpointName);
       const delays: TSimulationEndpointDelay[] = metricsInThisTimeSlot.getEndpointDelay(uniqueEndpointName);
+      const maxLatency = metricsInThisTimeSlot.getEndpointMaxLatency(uniqueEndpointName);
 
       // Simulate this endpointNode’s own error state
       const ownSuccessStatus = new Map<string, boolean>();
@@ -152,9 +153,9 @@ export default class LoadSimulationPropagator {
         const jitteredLatency = this.latencySimulator.computeLatency(
           uniqueEndpointName,
           delays,
+          maxLatency,
           requestCount,
           capacity
-          // metricsInThisTimeSlot.getEntryPointRequestCount(uniqueEndpointName),
         );
         totalLatencyMap.set(reqId, jitteredLatency); // Default latency starts with own latency
       }

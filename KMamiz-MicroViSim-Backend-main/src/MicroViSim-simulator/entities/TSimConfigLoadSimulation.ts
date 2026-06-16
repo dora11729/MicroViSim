@@ -87,6 +87,7 @@ export const simulationNamespaceServiceMetricsSchema = z.object({
   services: z.array(simulationServiceMetricSchema),
 }).strict();
 
+// -------- latency --------
 const baseDelaySchema = z.object({
   latencyMs: z.number().min(0, {
     message: "latencyMs must be zero or greater.",
@@ -116,7 +117,7 @@ const spikeDelaySchema = baseDelaySchema.extend({
     .refine((val) => val >= 0 && val <= 1, {
       message: "Invalid spikeProbability. It must be between 0 and 1.",
     })
-    .default(0.1),
+    .default(0.05),
   spikeMagnitude: z.number().min(1, {
     message: "spikeMagnitude must be at least 1.",
   }).default(5),
@@ -132,10 +133,7 @@ const gradualDriftDelaySchema = baseDelaySchema.extend({
   }),
   driftRate: z.number().min(0, {
     message: "driftRate must be zero or greater.",
-  }).default(4),
-  maxLatencyMs: z.number().min(0, {
-    message: "maxLatencyMs must be zero or greater.",
-  }).default(30000),
+  }).default(4)
 });
 
 const loadDrivenDelaySchema = baseDelaySchema.extend({
@@ -170,6 +168,9 @@ export const simulationEndpointMetricSchema = z.object({
   uniqueEndpointName: z.string().optional(),// Users do not need to provide this.
   endpointId: endpointIdSchema,
   delay: endpointDelaySchema,
+  maxLatencyMs: z.number().min(0, {
+    message: "maxLatencyMs must be zero or greater.",
+  }).default(0),
   errorRatePercent: z
     .number()
     .refine((val) => val >= 0 && val <= 100, {

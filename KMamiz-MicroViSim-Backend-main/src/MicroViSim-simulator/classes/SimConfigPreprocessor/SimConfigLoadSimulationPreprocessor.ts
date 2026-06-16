@@ -167,6 +167,7 @@ export default class SimConfigLoadSimulationPreprocessor {
         latencyMs: 0,
         jitterMs: 0,
       }],
+      maxLatencyMs: 0,
       expectedExternalDailyRequestCount: 0,
       errorRatePercent: 0,
       fallbackStrategy: "failIfAnyDependentFail" as TFallbackStrategy,

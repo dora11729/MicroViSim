@@ -79,6 +79,11 @@ export class TCMetricsPerTimeSlot {
 
   // Aggregates the error rates of endpoints during the current time slot
   // key: uniqueEndpointName
+  // value: maxLatencyMs (0 means no cap)
+  private _endpointMaxLatency: Map<string, number>;
+
+  // Aggregates the error rates of endpoints during the current time slot
+  // key: uniqueEndpointName
   // value: error rate (0~1)
   private _endpointErrorRate: Map<string, number>;
 
@@ -96,6 +101,7 @@ export class TCMetricsPerTimeSlot {
     this._entryPointRequestCountMap = new Map<string, number>();
     this._serviceReplicaCountMap = new Map<string, number>();
     this._endpointDelayMap = new Map<string, TSimulationEndpointDelay[]>();
+    this._endpointMaxLatency = new Map<string, number>();
     this._endpointErrorRate = new Map<string, number>();
     this._serviceCapacityPerReplicaMap = new Map<string, number>();
   }
@@ -114,6 +120,9 @@ export class TCMetricsPerTimeSlot {
     };
     this._endpointDelayMap.set(uniqueEndpointName, current);
   }
+  setEndpointMaxLatency(uniqueEndpointName: string, maxLatencyMs: number): void {
+    this._endpointMaxLatency.set(uniqueEndpointName, Math.max(0, maxLatencyMs));
+  }
   setEndpointErrorRate(uniqueEndpointName: string, errorRate: number): void {
     this._endpointErrorRate.set(uniqueEndpointName, Math.max(0, errorRate));
   }
@@ -130,6 +139,9 @@ export class TCMetricsPerTimeSlot {
   }
   setEndpointDelayMap(newMap: Map<string, TSimulationEndpointDelay[]>): void {
     this._endpointDelayMap = new Map(newMap);
+  }
+  setEndpointMaxLatencyMap(newMap: Map<string, number>): void {
+    this._endpointMaxLatency = new Map(newMap);
   }
   setEndpointErrorRateMap(newMap: Map<string, number>): void {
     this._endpointErrorRate = new Map(newMap);
@@ -155,6 +167,9 @@ export class TCMetricsPerTimeSlot {
     ]
     return this._endpointDelayMap.get(uniqueEndpointName) ?? defaultDelay;
   }
+  getEndpointMaxLatency(uniqueEndpointName: string): number {
+    return this._endpointMaxLatency.get(uniqueEndpointName) ?? 0;
+  }
   getEndpointErrorRate(uniqueEndpointName: string): number {
     return this._endpointErrorRate.get(uniqueEndpointName) ?? 0;
   }
@@ -172,6 +187,9 @@ export class TCMetricsPerTimeSlot {
 
   getEndpointDelayMap(): Map<string, TSimulationEndpointDelay[]> {
     return new Map(this._endpointDelayMap);
+  }
+  getEndpointMaxLatencyMap(): Map<string, number> {
+    return new Map(this._endpointMaxLatency);
   }
   getEndpointErrorRateMap(): Map<string, number> {
     return new Map(this._endpointErrorRate);

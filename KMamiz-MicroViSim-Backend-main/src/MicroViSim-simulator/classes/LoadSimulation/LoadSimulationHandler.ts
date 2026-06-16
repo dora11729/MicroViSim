@@ -186,6 +186,7 @@ export default class LoadSimulationHandler {
 
     // construct base data maps from simulation config
     const baseEndpointDelayMap = new Map<string, TSimulationEndpointDelay[]>();
+    const baseEndpointMaxLatencyMap = new Map<string, number>();
     const baseEndpointErrorRateMap = new Map<string, number>();
     const baseEndpointSimulationReqCountsMap = new Map<string, number[][]>();
     const baseServiceReplicaCountMap = new Map<string, number>(
@@ -198,6 +199,9 @@ export default class LoadSimulationHandler {
 
       // EndpointDelay
       baseEndpointDelayMap.set(uniqueEndpointName, metric.delay);
+
+      // EndpointMaxLatency
+      baseEndpointMaxLatencyMap.set(uniqueEndpointName, metric.maxLatencyMs);
 
       // EndpointErrorRate
       baseEndpointErrorRateMap.set(uniqueEndpointName,
@@ -239,6 +243,9 @@ export default class LoadSimulationHandler {
 
         // EndpointDelay
         metricsInThisTimeSlot.setEndpointDelayMap(baseEndpointDelayMap);
+
+        // EndpointMaxLatency
+        metricsInThisTimeSlot.setEndpointMaxLatencyMap(baseEndpointMaxLatencyMap);
 
         // EndpointErrorRate
         metricsInThisTimeSlot.setEndpointErrorRateMap(baseEndpointErrorRateMap);
@@ -529,8 +536,6 @@ export default class LoadSimulationHandler {
   }
 
 
-  // return desiredReplicas
-  // 之後test好 可以再整理一下(刪掉註解)
   private computeDesiredReplicas(
     requestCountPerSecond: number,
     currentReplicas: number,
