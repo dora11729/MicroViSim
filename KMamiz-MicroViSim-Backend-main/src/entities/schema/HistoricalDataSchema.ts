@@ -16,6 +16,7 @@ export const HistoricalDataSchema = new Schema<THistoricalData>({
       risk: { type: Number },
       latencyMean: { type: Number, required: true },
       latencyCV: { type: Number, required: true },
+      latencyP95: { type: Number, required: true },
       replicas:  { type: Number, required: true },
       endpoints: [
         {

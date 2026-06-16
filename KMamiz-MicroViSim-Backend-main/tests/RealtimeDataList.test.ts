@@ -9,6 +9,10 @@ describe("RealtimeDataList", () => {
 
   it("converts to combined realtime data", () => {
     const rlData = new RealtimeDataList(MockBaseRlData1);
-    expect(rlData.toCombinedRealtimeData().toJSON()).toEqual(MockBaseCrlData1);
+    const result = rlData.toCombinedRealtimeData().toJSON();
+
+    expect(result[0].latency.p95).toBeCloseTo(MockBaseCrlData1[0].latency.p95, 10);
+    result[0].latency.p95 = MockBaseCrlData1[0].latency.p95;
+    expect(result).toEqual(MockBaseCrlData1);
   });
 });

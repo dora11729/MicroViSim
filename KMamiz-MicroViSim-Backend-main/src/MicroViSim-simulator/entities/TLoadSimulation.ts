@@ -25,7 +25,7 @@ export type TEndpointPropagationStatsForOneTimeSlot = {
   requestCount: number;
   ownErrorCount: number;        // Number of errors originating from the endpointNode itself
   downstreamErrorCount: number; // Number of errors caused by downstream endpointNodes
-  latencyStatsByStatus: Map<string, { mean: number; cv: number }>; //Key: status code, Value: latency statistics (mean and coefficient of variation) for all requests with this status code
+  latencyStatsByStatus: Map<string, { mean: number; cv: number; p95: number }>; //Key: status code, Value: latency statistics (mean and coefficient of variation) for all requests with this status code
   // latencyBreakdown: TLatencyBreakdown; // Latency breakdown considering the influence of error rates, used for more accurate latency estimation under overload conditions
 };
 

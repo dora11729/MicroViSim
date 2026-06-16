@@ -3,8 +3,9 @@ import { TSimulationEndpointDelay } from "../../entities/TSimConfigLoadSimulatio
 export default class LatencySimulator {
     // AR(1) 狀態：記錄每個 endpoint 的上一個 epsilon
     private epsilonState = new Map<string, number>();
-    // Spike 狀態：記錄每個 endpoint 目前的突刺剩餘 slot 數
-    private spikeState = new Map<string, number>();
+
+    private spikeActiveState = new Map<string, boolean>();
+    private spikeRemainingSlots = new Map<string, number>();
 
     // private preRequestCountMap = new Map<string, number>(); // 上一個 slot 的 request count，用於 Gradual Drift 計算
 
@@ -41,6 +42,7 @@ export default class LatencySimulator {
      */
     computeLatency(
         endpointName: string,
+        serviceName: string,
         delays: TSimulationEndpointDelay[],
         maxLatencyMs: number,
         requestCount: number,
@@ -57,7 +59,8 @@ export default class LatencySimulator {
                     total += this.computeStable(endpointName, delay.latencyMs, delay.jitterMs * 3);
                     break;
                 case "spike":
-                    total += this.computeSpike(endpointName, delay, total);
+                    total += this.computeSpike(endpointName, serviceName, delay, total);
+                    console.log(`[Spike] After computation, total latency: ${total} ms.`);
                     break;
                 case "gradualDrift":
                     total += this.computeGradualDrift(endpointName, delay);
@@ -72,8 +75,8 @@ export default class LatencySimulator {
     }
 
     private computeStable(
-        endpointName: string, 
-        mean: number, 
+        endpointName: string,
+        mean: number,
         std: number,
         isSmoothed: boolean = true
     ): number {
@@ -90,30 +93,38 @@ export default class LatencySimulator {
         return Math.max(0, Math.exp(mu + sigma * smoothedEpsilon));
     }
 
+    advanceSpike(serviceName: string, spikeProbability: number, spikeDuration: number): void {
+        const remaining = this.spikeRemainingSlots.get(serviceName) ?? 0;
+
+        if (remaining > 0) {
+            // 突刺持續中
+            this.spikeActiveState.set(serviceName, true);
+            this.spikeRemainingSlots.set(serviceName, remaining - 1);
+        } else if (Math.random() < spikeProbability) {
+            // 觸發新突刺
+            this.spikeActiveState.set(serviceName, true);
+            this.spikeRemainingSlots.set(serviceName, spikeDuration - 1);
+        } else {
+            // 沒有突刺
+            this.spikeActiveState.set(serviceName, false);
+        }
+    }
+
     private computeSpike(
         endpointName: string,
-        delay: TSimulationEndpointDelay, 
+        serviceName: string,
+        delay: TSimulationEndpointDelay,
         baseLatency: number = 0
     ): number {
         if (delay.type !== "spike") return 0;
-        const { latencyMs, jitterMs, spikeProbability, spikeMagnitude, spikeDuration } = delay;
+        const { latencyMs, jitterMs, spikeMagnitude } = delay;
 
-        // 檢查是否在突刺中
-        const remainingSlots = this.spikeState.get(endpointName) ?? 0;
+        const isActive = this.spikeActiveState.get(serviceName) ?? false;
         const effectiveBase = latencyMs > 0 ? latencyMs : baseLatency;
 
-        if (remainingSlots > 0) {
-            // 突刺持續中
-            this.spikeState.set(endpointName, remainingSlots - 1);
+        if (isActive) {
             return this.computeStable(endpointName, effectiveBase * spikeMagnitude, jitterMs);
         }
-
-        // 以機率觸發新突刺
-        if (Math.random() < spikeProbability) {
-            this.spikeState.set(endpointName, spikeDuration - 1);
-            return this.computeStable(endpointName, effectiveBase * spikeMagnitude, jitterMs * spikeMagnitude);
-        }
-
         return this.computeStable(endpointName, latencyMs, jitterMs);
     }
 

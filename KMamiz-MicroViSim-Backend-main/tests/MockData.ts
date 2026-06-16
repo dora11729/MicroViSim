@@ -4484,6 +4484,7 @@ const MockBaseCrlData1: TCombinedRealtimeData[] = [
     latency: {
       mean: 100,
       cv: 0.17888543819998,
+      p95: 129.426654583896723,
     },
     method: Method,
     status: Status,
@@ -4512,6 +4513,7 @@ const MockBaseCrlData2: TCombinedRealtimeData[] = [
     latency: {
       mean: 150,
       cv: Math.sqrt(divBaseData2 / 10 - Math.pow(150, 2)) / 150,
+      p95: 170,
     },
     method: Method,
     status: Status,
@@ -4547,6 +4549,7 @@ const MockCombinedBaseData: TCombinedRealtimeData[] = [
     latency: {
       mean: 125,
       cv: 0.25861167800391,
+      p95: 178.17702628955462,
     },
   },
 ];
@@ -4580,6 +4583,7 @@ const MockHistoricalData: THistoricalData[] = [
             labelName: undefined,
             latencyCV: 0.17888543819998,
             latencyMean: 100,
+            latencyP95: 129.4266545838967,
             method: Method,
             requestErrors: 0,
             requests: 10,
@@ -4596,6 +4600,7 @@ const MockHistoricalData: THistoricalData[] = [
         serverErrors: 0,
         latencyMean: 100,
         latencyCV: 0.17888543819998,
+        latencyP95: 129.4266545838967,
         uniqueServiceName: UniqueServiceName,
         risk: 0.1,
         replicas: 1,

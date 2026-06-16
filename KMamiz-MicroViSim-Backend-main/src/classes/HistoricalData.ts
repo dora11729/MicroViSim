@@ -46,8 +46,9 @@ export class HistoricalData {
               ...base,
               combined: normal,
               latency: {
-                mean: 100,
+                mean: e.latencyMean,
                 cv: e.latencyCV,
+                p95: e.latencyP95,
               },
               status: "200",
             });
@@ -58,8 +59,9 @@ export class HistoricalData {
               ...base,
               combined: e.requestErrors,
               latency: {
-                mean: 100,
+                mean: e.latencyMean,
                 cv: e.latencyCV,
+                p95: e.latencyP95,
               },
               status: "400",
             });
@@ -70,8 +72,9 @@ export class HistoricalData {
               ...base,
               combined: e.serverErrors,
               latency: {
-                mean: 100,
+                mean: e.latencyMean,
                 cv: e.latencyCV,
+                p95: e.latencyP95,
               },
               status: "500",
             });

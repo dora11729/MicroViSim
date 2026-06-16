@@ -14,6 +14,8 @@ describe("CombinedRealtimeDataList", () => {
   it("converts to HistoricalData", () => {
     const data = new CombinedRealtimeDataList(MockBaseCrlData1);
     const h = data.toHistoricalData(MockDependencies, MockReplicas);
+    expect(h[0].services[0].latencyP95).toBeCloseTo(MockHistoricalData[0].services[0].latencyP95, 10);
+    h[0].services[0].latencyP95 = MockHistoricalData[0].services[0].latencyP95;
     expect(h).toEqual(MockHistoricalData);
   });
 

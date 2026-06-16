@@ -62,6 +62,7 @@ export default class LoadSimulationPropagator {
       propagationResult.set(timeSlotKey, propagationResultAtThisTimeSlot);
 
       if (shouldComputeLatency) {
+        const advancedSpikeServices = new Set<string>();
         for (const metric of endpointMetrics) {
           const gradualDriftDelay = metric.delay?.find(d => d.type === "gradualDrift");
           if (gradualDriftDelay && gradualDriftDelay.type === "gradualDrift") {
@@ -69,6 +70,19 @@ export default class LoadSimulationPropagator {
               metric.uniqueEndpointName ?? "",
               gradualDriftDelay.driftRate ?? 0,
             );
+          }
+
+          const spikeDelay = metric.delay?.find(d => d.type === "spike");
+          if (spikeDelay && spikeDelay.type === "spike") {
+            const serviceName = SimulatorUtils.extractUniqueServiceNameFromEndpointName(metric.uniqueEndpointName ?? "");
+            if (!advancedSpikeServices.has(serviceName)) {
+              this.latencySimulator.advanceSpike(
+                serviceName,
+                spikeDelay.spikeProbability,
+                spikeDelay.spikeDuration,
+              );
+              advancedSpikeServices.add(serviceName);
+            }
           }
         }
       }
@@ -152,6 +166,7 @@ export default class LoadSimulationPropagator {
         const requestCount = filteredRequestIds.length;
         const jitteredLatency = this.latencySimulator.computeLatency(
           uniqueEndpointName,
+          uniqueServiceName,
           delays,
           maxLatency,
           requestCount,
@@ -299,7 +314,7 @@ export default class LoadSimulationPropagator {
         requestCount: 0,
         ownErrorCount: 0,
         downstreamErrorCount: 0,
-        latencyStatsByStatus: new Map<string, { mean: number; cv: number }>(),
+        latencyStatsByStatus: new Map<string, { mean: number; cv: number; p95: number }>(),
       };
       endpointStats.set(uniqueEndpointName, {
         requestCount: prevStats.requestCount + filteredRequestIds.length,
@@ -321,16 +336,17 @@ export default class LoadSimulationPropagator {
 
     for (const [uniqueEndpointName, statMap] of onlineLatencyStats.entries()) {
       const prevStats = endpointStats.get(uniqueEndpointName)!;
-      const latencyStatsByStatus = new Map<string, { mean: number; cv: number }>();
+      const latencyStatsByStatus = new Map<string, { mean: number; cv: number; p95: number }>();
 
       for (const [status, statsData] of statMap.entries()) {
         if (shouldComputeLatency && statsData.count > 0) {
           const variance = statsData.count > 1 ? statsData.m2 / (statsData.count - 1) : 0;
           const stdDev = Math.sqrt(variance);
           const cv = statsData.mean !== 0 ? stdDev / statsData.mean : 0;
-          latencyStatsByStatus.set(status, { mean: statsData.mean, cv });
+          const p95 = statsData.mean + 1.645 * stdDev; // Approximate P95 using mean + 1.645*stdDev for normal distribution
+          latencyStatsByStatus.set(status, { mean: statsData.mean, cv, p95 });
         } else {
-          latencyStatsByStatus.set(status, { mean: 0, cv: 0 });
+          latencyStatsByStatus.set(status, { mean: 0, cv: 0, p95: 0 });
         }
       }
 

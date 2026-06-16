@@ -19,6 +19,7 @@ export type THistoricalServiceInfo = {
   risk?: number;
   latencyMean: number; //milliseconds
   latencyCV: number;
+  latencyP95: number;
   replicas: number;
   endpoints: THistoricalEndpointInfo[];
 };
@@ -33,4 +34,5 @@ export type THistoricalEndpointInfo = {
   requestErrors: number;
   latencyMean: number; //milliseconds
   latencyCV: number;
+  latencyP95: number;
 };

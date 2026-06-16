@@ -74,7 +74,7 @@ export default class LoadSimulationDataGenerator {
             responseContentType: resp2xx?.responseContentType,
             combined: successCount,
             status: resp2xx?.status ?? "200",
-            latency: stats.latencyStatsByStatus.get("200") ?? { mean: 0, cv: 0 },
+            latency: stats.latencyStatsByStatus.get("200") ?? { mean: 0, cv: 0, p95: 0 },
           });
         }
 
@@ -89,7 +89,7 @@ export default class LoadSimulationDataGenerator {
             responseContentType: resp5xx?.responseContentType,
             combined: errorCount,
             status: resp5xx?.status ?? "500",
-            latency: stats.latencyStatsByStatus.get("500") ?? { mean: 0, cv: 0 },
+            latency: stats.latencyStatsByStatus.get("500") ?? { mean: 0, cv: 0, p95: 0 },
           });
         }
       }

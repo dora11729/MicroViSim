@@ -13,6 +13,7 @@ export type TCombinedRealtimeData = {
   latency: {
     mean: number;
     cv: number;
+    p95: number;
   };
   status: string;
   combined: number;

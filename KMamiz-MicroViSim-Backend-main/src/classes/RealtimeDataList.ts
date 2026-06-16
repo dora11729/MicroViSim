@@ -83,6 +83,7 @@ export class RealtimeDataList {
               latency: {
                 mean: Utils.ToPrecise(mean),
                 cv: Utils.ToPrecise(cv),
+                p95: Utils.ToPrecise(mean * (1 + 1.645 * cv)), 
               },
               requestContentType: combined.requestContentType,
               responseContentType: combined.responseContentType,
