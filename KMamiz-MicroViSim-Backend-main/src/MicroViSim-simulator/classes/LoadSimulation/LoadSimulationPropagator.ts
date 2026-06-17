@@ -61,6 +61,11 @@ export default class LoadSimulationPropagator {
       )
       propagationResult.set(timeSlotKey, propagationResultAtThisTimeSlot);
 
+      /*
+      Advance the spike and drift states for the next time slot.
+      1. For each endpoint, if it has a gradual drift delay, we advance the drift state.
+      2. For each service, if it has a spike delay, we advance the spike state.
+      */
       if (shouldComputeLatency) {
         const advancedSpikeServices = new Set<string>();
         for (const metric of endpointMetrics) {

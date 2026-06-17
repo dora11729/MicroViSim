@@ -4,6 +4,7 @@ export default class LatencySimulator {
     // AR(1) 狀態：記錄每個 endpoint 的上一個 epsilon
     private epsilonState = new Map<string, number>();
 
+    // key: serviceName
     private spikeActiveState = new Map<string, boolean>();
     private spikeRemainingSlots = new Map<string, number>();
 
@@ -94,18 +95,23 @@ export default class LatencySimulator {
     }
 
     advanceSpike(serviceName: string, spikeProbability: number, spikeDuration: number): void {
+        if (!this.spikeActiveState.has(serviceName)) {
+            this.spikeActiveState.set(serviceName, false);
+            this.spikeRemainingSlots.set(serviceName, 0);
+        }
+        
         const remaining = this.spikeRemainingSlots.get(serviceName) ?? 0;
 
         if (remaining > 0) {
-            // 突刺持續中
+            // keep spike
             this.spikeActiveState.set(serviceName, true);
             this.spikeRemainingSlots.set(serviceName, remaining - 1);
-        } else if (Math.random() < spikeProbability) {
-            // 觸發新突刺
+        } else if (!this.spikeActiveState.get(serviceName) && Math.random() < spikeProbability) {
+            // trigger new spike
             this.spikeActiveState.set(serviceName, true);
             this.spikeRemainingSlots.set(serviceName, spikeDuration - 1);
         } else {
-            // 沒有突刺
+            // no spike
             this.spikeActiveState.set(serviceName, false);
         }
     }
