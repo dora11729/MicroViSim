@@ -171,6 +171,9 @@ export const simulationEndpointMetricSchema = z.object({
   maxLatencyMs: z.number().min(0, {
     message: "maxLatencyMs must be zero or greater.",
   }).default(0),
+  timeoutMs: z.number().min(0, {
+    message: "timeoutMs must be zero or greater.",
+  }).default(0),
   errorRatePercent: z
     .number()
     .refine((val) => val >= 0 && val <= 100, {

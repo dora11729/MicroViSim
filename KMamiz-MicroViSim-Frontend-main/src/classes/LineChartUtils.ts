@@ -9,7 +9,8 @@ import { Color } from "./ColorUtils";
 import Config from "../../Config";
 
 export default class LineChartUtils {
-  static DefaultOptions(title: string): ApexOptions {
+  static DefaultOptions(title: string, filename?: string): ApexOptions {
+    const exportFilename = filename || title || "chart";
     return {
       title: {
         text: title,
@@ -19,6 +20,13 @@ export default class LineChartUtils {
         type: "line",
         animations: {
           enabled: false,
+        },
+        toolbar: {
+          export: {
+            csv: { filename: exportFilename },
+            svg: { filename: exportFilename },
+            png: { filename: exportFilename },
+          },
         },
       },
       dataLabels: {

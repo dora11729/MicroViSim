@@ -15,9 +15,12 @@ export const HistoricalDataSchema = new Schema<THistoricalData>({
       requestErrors: { type: Number, required: true },
       risk: { type: Number },
       latencyMean: { type: Number, required: true },
+      latencyMeanNoDownstream: { type: Number, default: 0 },
       latencyCV: { type: Number, required: true },
       latencyP95: { type: Number, required: true },
       replicas:  { type: Number, required: true },
+      utilization: { type: Number, default: 0 },
+      capacityPerReplica: { type: Number },
       endpoints: [
         {
           uniqueServiceName: { type: String, required: true },

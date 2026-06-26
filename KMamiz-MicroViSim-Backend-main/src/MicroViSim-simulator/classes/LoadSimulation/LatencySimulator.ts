@@ -61,7 +61,6 @@ export default class LatencySimulator {
                     break;
                 case "spike":
                     total += this.computeSpike(endpointName, serviceName, delay, total);
-                    console.log(`[Spike] After computation, total latency: ${total} ms.`);
                     break;
                 case "gradualDrift":
                     total += this.computeGradualDrift(endpointName, delay);

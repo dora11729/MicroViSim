@@ -15,6 +15,13 @@ export type TCombinedRealtimeData = {
     cv: number;
     p95: number;
   };
+  ownLatency?: {
+    mean: number;
+    cv: number;
+    p95: number;
+  };
+  capacityPerReplica?: number;
+  bucketDurationSeconds?: number;
   status: string;
   combined: number;
   responseBody?: any;

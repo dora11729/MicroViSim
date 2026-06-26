@@ -131,6 +131,7 @@ export default class LoadSimulationHandler {
     const realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]> = this.dataGenerator.generateRealtimeDataFromSimulationResults(
       EndpointRealTimeBaseDatas,
       propagationResultsWithOverloadError,
+      metricsPerTimeSlotMap,
       simulateDate
     );
 
@@ -187,6 +188,7 @@ export default class LoadSimulationHandler {
     // construct base data maps from simulation config
     const baseEndpointDelayMap = new Map<string, TSimulationEndpointDelay[]>();
     const baseEndpointMaxLatencyMap = new Map<string, number>();
+    const baseEndpointTimeoutMsMap = new Map<string, number>();
     const baseEndpointErrorRateMap = new Map<string, number>();
     const baseEndpointSimulationReqCountsMap = new Map<string, number[][]>();
     const baseServiceReplicaCountMap = new Map<string, number>(
@@ -202,6 +204,9 @@ export default class LoadSimulationHandler {
 
       // EndpointMaxLatency
       baseEndpointMaxLatencyMap.set(uniqueEndpointName, metric.maxLatencyMs);
+
+      // EndpointTimeout
+      baseEndpointTimeoutMsMap.set(uniqueEndpointName, metric.timeoutMs);
 
       // EndpointErrorRate
       baseEndpointErrorRateMap.set(uniqueEndpointName,
@@ -246,6 +251,9 @@ export default class LoadSimulationHandler {
 
         // EndpointMaxLatency
         metricsInThisTimeSlot.setEndpointMaxLatencyMap(baseEndpointMaxLatencyMap);
+
+        // EndpointTimeout
+        metricsInThisTimeSlot.setEndpointTimeoutMsMap(baseEndpointTimeoutMsMap);
 
         // EndpointErrorRate
         metricsInThisTimeSlot.setEndpointErrorRateMap(baseEndpointErrorRateMap);

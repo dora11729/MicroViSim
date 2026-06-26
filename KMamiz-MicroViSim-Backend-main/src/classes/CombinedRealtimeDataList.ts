@@ -135,6 +135,11 @@ export default class CombinedRealtimeDataList {
         const validLatencies = r.filter(rl => typeof (rl.latency.mean) === "number" && isFinite(rl.latency.mean));
         const meanLatency = validLatencies.reduce((sum, rl) => sum + rl.latency.mean, 0) / validLatencies.length;
         const latencyMean = (typeof (meanLatency) === "number" && isFinite(meanLatency)) ? meanLatency : 0;
+        const validOwnLatencies = r.filter(rl => rl.ownLatency && typeof (rl.ownLatency.mean) === "number" && isFinite(rl.ownLatency.mean));
+        const meanOwnLatency = validOwnLatencies.length > 0
+          ? validOwnLatencies.reduce((sum, rl) => sum + rl.ownLatency!.mean, 0) / validOwnLatencies.length
+          : latencyMean;
+        const latencyMeanNoDownstream = (typeof (meanOwnLatency) === "number" && isFinite(meanOwnLatency)) ? meanOwnLatency : 0;
         const latencyCV = Math.max(...r.map((rl) => rl.latency.cv || 0));
         const latencyP95 = latencyMean * (1 + 1.645 * latencyCV);
 
@@ -142,6 +147,12 @@ export default class CombinedRealtimeDataList {
           (rep) => rep.uniqueServiceName === uniqueServiceName
         );
         const replicaCount = replicaInfo ? replicaInfo.replicas : 1;
+        const capacityPerReplica = r.find(rl => rl.capacityPerReplica !== undefined)?.capacityPerReplica ?? 0;
+        const bucketDurationSeconds = r.find(rl => rl.bucketDurationSeconds !== undefined)?.bucketDurationSeconds ?? 3600;
+        const totalCapacity = capacityPerReplica * replicaCount;
+        const utilization = totalCapacity > 0
+          ? (requests / bucketDurationSeconds) / totalCapacity
+          : 0;
 
         return {
           date: new Date(time),
@@ -153,9 +164,12 @@ export default class CombinedRealtimeDataList {
           requestErrors,
           serverErrors,
           latencyMean: latencyMean,
+          latencyMeanNoDownstream,
           latencyCV: latencyCV,
           latencyP95: latencyP95,
           replicas: replicaCount,
+          utilization,
+          capacityPerReplica: capacityPerReplica > 0 ? capacityPerReplica : undefined,
           uniqueServiceName,
           risk: risks.find(
             (rsk) => rsk.uniqueServiceName === uniqueServiceName
@@ -260,6 +274,23 @@ export default class CombinedRealtimeDataList {
           }
         );
 
+        const mergedOwnLatency = group.reduce(
+          (acc, curr) => {
+            const ownMean = curr.ownLatency?.mean ?? curr.latency.mean;
+            const ownCv = curr.ownLatency?.cv ?? curr.latency.cv;
+            return {
+              ...this.combineLatencyCVAndMean(acc.n, acc.mean, acc.cv,
+                curr.combined, ownMean, ownCv),
+              n: acc.n + curr.combined,
+            };
+          },
+          {
+            mean: 0,
+            cv: 0,
+            n: 0,
+          }
+        );
+
         return {
           ...baseSample,
           latestTimestamp: combined.latestTimestamp,
@@ -267,10 +298,17 @@ export default class CombinedRealtimeDataList {
           requestSchema: combined.requestSchema,
           responseBody: combined.responseBody,
           responseSchema: combined.responseSchema,
+          ...(sample.capacityPerReplica !== undefined && { capacityPerReplica: sample.capacityPerReplica }),
+          ...(sample.bucketDurationSeconds !== undefined && { bucketDurationSeconds: sample.bucketDurationSeconds }),
           latency: {
             mean: Utils.ToPrecise(mergedLatency.mean),
             cv: Utils.ToPrecise(mergedLatency.cv),
             p95: Utils.ToPrecise(mergedLatency.mean * (1 + 1.645 * mergedLatency.cv)), 
+          },
+          ownLatency: {
+            mean: Utils.ToPrecise(mergedOwnLatency.mean),
+            cv: Utils.ToPrecise(mergedOwnLatency.cv),
+            p95: Utils.ToPrecise(mergedOwnLatency.mean * (1 + 1.645 * mergedOwnLatency.cv)),
           },
         };
       }

@@ -4,12 +4,13 @@ import LineChartUtils from "../classes/LineChartUtils";
 
 export default function LineChart(props: {
   title?: string;
+  filename?: string;
   series: ApexAxisChartSeries;
   height?: number;
   overwriteOptions?: ApexOptions;
 }) {
   const options: ApexOptions = {
-    ...LineChartUtils.DefaultOptions(props.title || ""),
+    ...LineChartUtils.DefaultOptions(props.title || "", props.filename),
     ...props.overwriteOptions,
   };
 

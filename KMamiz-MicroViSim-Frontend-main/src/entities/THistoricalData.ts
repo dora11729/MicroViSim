@@ -18,9 +18,12 @@ export type THistoricalServiceInfo = {
   requestErrors: number;
   risk?: number;
   latencyMean: number;
+  latencyMeanNoDownstream?: number;
   latencyCV: number;
   latencyP95: number;
   replicas: number;
+  utilization?: number;
+  capacityPerReplica?: number;
   endpoints: THistoricalEndpointInfo[];
 };
 

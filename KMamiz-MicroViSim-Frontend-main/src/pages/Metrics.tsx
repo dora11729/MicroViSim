@@ -93,8 +93,18 @@ export default function Metrics() {
       { name: "Service Errors", field: "serverErrors" },
       { name: "Latency (Coefficient of Variation)", field: "latencyCV" },
       { name: "LatencyMean", field: "latencyMean" },
+      { name: "LatencyMean (No Downstream)", field: "latencyMeanNoDownstream" },
       { name: "LatencyP95", field: "latencyP95" },
       { name: "Replicas", field: "replicas" },
+      {
+        name: "Utilization",
+        field: "utilization",
+        options: {
+          yaxis: {
+            min: 0,
+          },
+        },
+      },
     ];
 
   const statisticsTimeOptions = (Config.backendConfig.SimulatorMode
@@ -142,6 +152,7 @@ export default function Metrics() {
             <Grid key={c.name} item xs={6}>
               <LineChart
                 title={c.name}
+                filename={c.field}
                 series={LineChartUtils.MappedBaseDataToSeriesData(
                   mappedHistoricalData,
                   c.field

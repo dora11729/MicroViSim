@@ -108,6 +108,7 @@ export default class LoadSimulationPropagator {
 
     // for compute latency CV(// Use Welford's algorithm to calculate CV and avoid overflow issues when computing variance)
     const onlineLatencyStats = new Map<string, Map<string, { count: number; mean: number; m2: number }>>();
+    const onlineOwnLatencyStats = new Map<string, Map<string, { count: number; mean: number; m2: number }>>();
     const updateOnlineStats = (stats: { count: number; mean: number; m2: number }, x: number) => {
       stats.count += 1;
       const delta = x - stats.mean;
@@ -127,6 +128,7 @@ export default class LoadSimulationPropagator {
 
       const currentStatus = new Map<string, boolean>();
       const totalLatencyMap = new Map<string, number>();
+      const ownLatencyMap = new Map<string, number>();
 
       // Filter out requestIds that have already visited this endpoint
       const filteredRequestIds = requestIds.filter(reqId => {
@@ -160,6 +162,7 @@ export default class LoadSimulationPropagator {
       const errorRate = metricsInThisTimeSlot.getEndpointErrorRate(uniqueEndpointName);
       const delays: TSimulationEndpointDelay[] = metricsInThisTimeSlot.getEndpointDelay(uniqueEndpointName);
       const maxLatency = metricsInThisTimeSlot.getEndpointMaxLatency(uniqueEndpointName);
+      const timeoutMs = metricsInThisTimeSlot.getEndpointTimeoutMs(uniqueEndpointName);
 
       // Simulate this endpointNode’s own error state
       const ownSuccessStatus = new Map<string, boolean>();
@@ -177,7 +180,7 @@ export default class LoadSimulationPropagator {
           requestCount,
           capacity
         );
-        totalLatencyMap.set(reqId, jitteredLatency); // Default latency starts with own latency
+        ownLatencyMap.set(reqId, jitteredLatency); // Default latency starts with own latency
       }
 
       // Get dependent endpoints
@@ -279,7 +282,7 @@ export default class LoadSimulationPropagator {
           currentStatus.set(reqId, newParentSuccess);
 
           // Update latency (critical path)
-          const ownLatency = totalLatencyMap.get(reqId) ?? 0;
+          const ownLatency = ownLatencyMap.get(reqId) ?? 0;
           const maxDependentLatency = dependentLatencies.length > 0 ? Math.max(...dependentLatencies) : 0;
 
           if (ownSuccessStatus.get(reqId)) {
@@ -290,17 +293,37 @@ export default class LoadSimulationPropagator {
         }
       }
 
+      // Apply timeout logic: if total latency exceeds timeoutMs, mark as failed
+      if (timeoutMs > 0) {
+        for (const reqId of filteredRequestIds) {
+          const totalLatency = totalLatencyMap.get(reqId) ?? 0;
+          if (totalLatency > timeoutMs) {
+            currentStatus.set(reqId, false);
+            ownSuccessStatus.set(reqId, false);
+            totalLatencyMap.set(reqId, timeoutMs);
+          }
+        }
+      }
+
       if (!onlineLatencyStats.has(uniqueEndpointName)) {
         onlineLatencyStats.set(uniqueEndpointName, new Map<string, { count: number; mean: number; m2: number }>());
       }
+      if (!onlineOwnLatencyStats.has(uniqueEndpointName)) {
+        onlineOwnLatencyStats.set(uniqueEndpointName, new Map<string, { count: number; mean: number; m2: number }>());
+      }
       const statMap = onlineLatencyStats.get(uniqueEndpointName)!;
+      const ownStatMap = onlineOwnLatencyStats.get(uniqueEndpointName)!;
 
       for (const reqId of filteredRequestIds) {
         const statusCode = currentStatus.get(reqId) ? "200" : "500";
         if (!statMap.has(statusCode)) {
           statMap.set(statusCode, { count: 0, mean: 0, m2: 0 });
         }
+        if (!ownStatMap.has(statusCode)) {
+          ownStatMap.set(statusCode, { count: 0, mean: 0, m2: 0 });
+        }
         updateOnlineStats(statMap.get(statusCode)!, totalLatencyMap.get(reqId)!);
+        updateOnlineStats(ownStatMap.get(statusCode)!, ownLatencyMap.get(reqId)!);
       }
 
       // Count own errors and downstream errors
@@ -320,12 +343,14 @@ export default class LoadSimulationPropagator {
         ownErrorCount: 0,
         downstreamErrorCount: 0,
         latencyStatsByStatus: new Map<string, { mean: number; cv: number; p95: number }>(),
+        ownLatencyStatsByStatus: new Map<string, { mean: number; cv: number; p95: number }>(),
       };
       endpointStats.set(uniqueEndpointName, {
         requestCount: prevStats.requestCount + filteredRequestIds.length,
         ownErrorCount: prevStats.ownErrorCount + ownErrorCount,
         downstreamErrorCount: prevStats.downstreamErrorCount + downstreamErrorCount,
         latencyStatsByStatus: prevStats.latencyStatsByStatus,
+        ownLatencyStatsByStatus: prevStats.ownLatencyStatsByStatus,
       });
 
       return { statusMap: currentStatus, latencyMap: totalLatencyMap };
@@ -342,6 +367,8 @@ export default class LoadSimulationPropagator {
     for (const [uniqueEndpointName, statMap] of onlineLatencyStats.entries()) {
       const prevStats = endpointStats.get(uniqueEndpointName)!;
       const latencyStatsByStatus = new Map<string, { mean: number; cv: number; p95: number }>();
+      const ownLatencyStatsByStatus = new Map<string, { mean: number; cv: number; p95: number }>();
+      const ownStatMap = onlineOwnLatencyStats.get(uniqueEndpointName)!;
 
       for (const [status, statsData] of statMap.entries()) {
         if (shouldComputeLatency && statsData.count > 0) {
@@ -355,9 +382,22 @@ export default class LoadSimulationPropagator {
         }
       }
 
+      for (const [status, statsData] of ownStatMap.entries()) {
+        if (shouldComputeLatency && statsData.count > 0) {
+          const variance = statsData.count > 1 ? statsData.m2 / (statsData.count - 1) : 0;
+          const stdDev = Math.sqrt(variance);
+          const cv = statsData.mean !== 0 ? stdDev / statsData.mean : 0;
+          const p95 = statsData.mean + 1.645 * stdDev;
+          ownLatencyStatsByStatus.set(status, { mean: statsData.mean, cv, p95 });
+        } else {
+          ownLatencyStatsByStatus.set(status, { mean: 0, cv: 0, p95: 0 });
+        }
+      }
+
       endpointStats.set(uniqueEndpointName, {
         ...prevStats,
         latencyStatsByStatus,
+        ownLatencyStatsByStatus,
       });
     }
 

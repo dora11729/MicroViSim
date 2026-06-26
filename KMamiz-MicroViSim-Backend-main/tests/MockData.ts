@@ -4551,6 +4551,11 @@ const MockCombinedBaseData: TCombinedRealtimeData[] = [
       cv: 0.25861167800391,
       p95: 178.17702628955462,
     },
+    ownLatency: {
+      mean: 125,
+      cv: 0.25861167800391,
+      p95: 178.17702628955462,
+    },
   },
 ];
 const MockReplicas: TReplicaCount[] = [
@@ -4599,11 +4604,13 @@ const MockHistoricalData: THistoricalData[] = [
         requestErrors: 0,
         serverErrors: 0,
         latencyMean: 100,
+        latencyMeanNoDownstream: 100,
         latencyCV: 0.17888543819998,
         latencyP95: 129.4266545838967,
         uniqueServiceName: UniqueServiceName,
         risk: 0.1,
         replicas: 1,
+        utilization: 0,
       },
     ],
   },
