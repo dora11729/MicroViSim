@@ -180,7 +180,10 @@ export default class LoadSimulationPropagator {
           requestCount,
           capacity
         );
-        ownLatencyMap.set(reqId, jitteredLatency); // Default latency starts with own latency
+
+        // Default latency starts with own latency
+        totalLatencyMap.set(reqId, jitteredLatency);
+        ownLatencyMap.set(reqId, jitteredLatency);
       }
 
       // Get dependent endpoints
