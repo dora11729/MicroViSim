@@ -117,7 +117,7 @@ export default class CombinedRealtimeDataList {
     risks: TRiskResult[],
     replicas: TReplicaCount[] = [],
   ) {
-    return [...serviceMap.entries()].map(
+    const result: THistoricalServiceInfo[] = [...serviceMap.entries()].map(
       ([uniqueServiceName, r]): THistoricalServiceInfo => {
         const [service, namespace, version] = uniqueServiceName.split("\t");
         const endpoints = allEndpoints.filter(
@@ -133,11 +133,15 @@ export default class CombinedRealtimeDataList {
           { requests: 0, requestErrors: 0, serverErrors: 0 }
         );
         const validLatencies = r.filter(rl => typeof (rl.latency.mean) === "number" && isFinite(rl.latency.mean));
-        const meanLatency = validLatencies.reduce((sum, rl) => sum + rl.latency.mean, 0) / validLatencies.length;
+        const totalRequests = validLatencies.reduce((sum, rl) => sum + rl.combined, 0);
+        const meanLatency = totalRequests > 0
+          ? validLatencies.reduce((sum, rl) => sum + rl.latency.mean * rl.combined, 0) / totalRequests
+          : 0;
         const latencyMean = (typeof (meanLatency) === "number" && isFinite(meanLatency)) ? meanLatency : 0;
         const validOwnLatencies = r.filter(rl => rl.ownLatency && typeof (rl.ownLatency.mean) === "number" && isFinite(rl.ownLatency.mean));
-        const meanOwnLatency = validOwnLatencies.length > 0
-          ? validOwnLatencies.reduce((sum, rl) => sum + rl.ownLatency!.mean, 0) / validOwnLatencies.length
+        const totalOwnRequests = validOwnLatencies.reduce((sum, rl) => sum + rl.combined, 0);
+        const meanOwnLatency = totalOwnRequests > 0
+          ? validOwnLatencies.reduce((sum, rl) => sum + rl.ownLatency!.mean * rl.combined, 0) / totalOwnRequests
           : latencyMean;
         const latencyMeanNoDownstream = (typeof (meanOwnLatency) === "number" && isFinite(meanOwnLatency)) ? meanOwnLatency : 0;
         const latencyCV = Math.max(...r.map((rl) => rl.latency.cv || 0));
@@ -153,6 +157,9 @@ export default class CombinedRealtimeDataList {
         const utilization = totalCapacity > 0
           ? (requests / bucketDurationSeconds) / totalCapacity
           : 0;
+        const riskValue = risks.find(
+          (rsk) => rsk.uniqueServiceName === uniqueServiceName
+        )?.norm;
 
         return {
           date: new Date(time),
@@ -171,14 +178,51 @@ export default class CombinedRealtimeDataList {
           utilization,
           capacityPerReplica: capacityPerReplica > 0 ? capacityPerReplica : undefined,
           uniqueServiceName,
-          risk: risks.find(
-            (rsk) => rsk.uniqueServiceName === uniqueServiceName
-          )!.norm,
+          risk: (riskValue != null && isFinite(riskValue)) ? riskValue : 0,
         };
       }
     );
-  }
 
+    /*
+    For replicas that exist but are not present in the serviceMap, 
+      add a record with zero traffic but correct replica count 
+      to ensure that faults like reduce-instance are reflected correctly even for services without traffic.
+    */
+    // 對 replicas 裡有、但 serviceMap 裡沒有的服務，
+    // 補產一筆零流量但 replica 數正確的紀錄，
+    // 確保 reduce-instance 等 fault 對無流量服務也能正確反映
+    const coveredServiceNames = new Set(serviceMap.keys());
+    for (const rep of replicas) {
+      if (coveredServiceNames.has(rep.uniqueServiceName)) continue;
+
+      const [service, namespace, version] = rep.uniqueServiceName.split("\t");
+      const riskInfo = risks.find(
+        (rsk) => rsk.uniqueServiceName === rep.uniqueServiceName
+      );
+
+      result.push({
+        date: new Date(time),
+        endpoints: [],
+        service,
+        namespace,
+        version,
+        uniqueServiceName: rep.uniqueServiceName,
+        requests: 0,
+        requestErrors: 0,
+        serverErrors: 0,
+        latencyMean: 0,
+        latencyMeanNoDownstream: 0,
+        latencyCV: 0,
+        latencyP95: 0,
+        replicas: rep.replicas,
+        utilization: 0,
+        capacityPerReplica: undefined,
+        risk: (riskInfo?.norm != null && isFinite(riskInfo.norm)) ? riskInfo.norm : 0,
+      });
+    }
+
+    return result;
+  }
   extractEndpointDataType(labelMap?: Map<string, string>) {
     return this._combinedRealtimeData
       .map((r): TEndpointDataType => {
@@ -303,7 +347,7 @@ export default class CombinedRealtimeDataList {
           latency: {
             mean: Utils.ToPrecise(mergedLatency.mean),
             cv: Utils.ToPrecise(mergedLatency.cv),
-            p95: Utils.ToPrecise(mergedLatency.mean * (1 + 1.645 * mergedLatency.cv)), 
+            p95: Utils.ToPrecise(mergedLatency.mean * (1 + 1.645 * mergedLatency.cv)),
           },
           ownLatency: {
             mean: Utils.ToPrecise(mergedOwnLatency.mean),

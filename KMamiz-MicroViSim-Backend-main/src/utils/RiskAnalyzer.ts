@@ -205,8 +205,8 @@ export default class RiskAnalyzer {
     invokedCounts.forEach((value, key) => {
       invokeProbability.push({
         uniqueServiceName: key,
-        probability: value.count / total,
-        errorRate: value.error / value.count,
+        probability: total > 0 ? value.count / total : 0,
+        errorRate: value.count > 0 ? value.error / value.count : 0,
       });
     });
     return invokeProbability;
@@ -242,7 +242,7 @@ export default class RiskAnalyzer {
 
       return {
         uniqueServiceName,
-        metric: sum / total,
+        metric: total > 0 ? sum / total : 0,
       };
     });
   }
@@ -253,6 +253,6 @@ export default class RiskAnalyzer {
       input.reduce((a, b) => a + Math.pow(b, 2), 0) / input.length -
         Math.pow(mean, 2)
     );
-    return standardDeviation / mean;
+    return mean !== 0 ? standardDeviation / mean : 0;
   }
 }

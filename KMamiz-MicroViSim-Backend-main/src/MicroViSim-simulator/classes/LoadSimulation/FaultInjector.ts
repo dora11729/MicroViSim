@@ -1,5 +1,6 @@
 import { TLoadSimulationSettings } from "../../entities/TSimConfigLoadSimulation";
 import { TCMetricsPerTimeSlot } from "../../entities/TLoadSimulation";
+import SimulatorUtils from "../SimulatorUtils";
 export default class FaultInjector {
 
   injectFault(
@@ -7,14 +8,16 @@ export default class FaultInjector {
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>
   ) {
     // Get all endpoint and service fault records per time slot from settings
-    const { allEndpointFaultRecords, allServiceFaultRecords } = this.generateAllFaultRecords(loadSimulationSettings);
+    const { allEndpointFaultRecords, allServiceFaultRecords, allServiceLevelEndpointFaultRecords } = this.generateAllFaultRecords(loadSimulationSettings);
 
     printNestedFaultRecords(allEndpointFaultRecords, true);
     printNestedFaultRecords(allServiceFaultRecords, false);
+    printNestedFaultRecords(allServiceLevelEndpointFaultRecords, false);
 
     for (const [timeSlotKey, metricsInThisTimeSlot] of metricsPerTimeSlotMap.entries()) {
 
       // Endpoint-level faults
+      // increase latency, increase error rate, inject traffic
       const endpointFaultRecordInThisTime = allEndpointFaultRecords.get(timeSlotKey);
       if (endpointFaultRecordInThisTime) {
         for (const [uniqueEndpointName, EndpointFaultObj] of endpointFaultRecordInThisTime.entries()) {
@@ -50,7 +53,44 @@ export default class FaultInjector {
         }
       }
 
-      // Service-level faults
+      // Service-level faults for increase-latency / increase-error-rate / inject-traffic
+      const serviceLevelFaultRecordInThisTime = allServiceLevelEndpointFaultRecords.get(timeSlotKey);
+      if (serviceLevelFaultRecordInThisTime) {
+        for (const [uniqueServiceName, ServiceEndpointFaultObj] of serviceLevelFaultRecordInThisTime.entries()) {
+          for (const uniqueEndpointName of metricsInThisTimeSlot.getEndpointDelayMap().keys()) {
+            if (SimulatorUtils.extractUniqueServiceNameFromEndpointName(uniqueEndpointName) !== uniqueServiceName) {
+              continue;
+            }
+            if (metricsInThisTimeSlot.getEntryPointRequestCount(uniqueEndpointName) <= 0) continue;
+
+            if (ServiceEndpointFaultObj.getIncreaseLatency() > 0) {
+              metricsInThisTimeSlot.addEndpointDelay(
+                uniqueEndpointName,
+                { latencyMs: ServiceEndpointFaultObj.getIncreaseLatency(), jitterMs: 0 }
+              )
+            }
+            if (ServiceEndpointFaultObj.getIncreaseErrorRatePercent() > 0) {
+              metricsInThisTimeSlot.addEndpointErrorRate(
+                uniqueEndpointName,
+                ServiceEndpointFaultObj.getIncreaseErrorRatePercent() / 100
+              );
+            }
+            if (ServiceEndpointFaultObj.getIncreseRequestCount() > 0) {
+              metricsInThisTimeSlot.addEntryPointRequestCount(
+                uniqueEndpointName,
+                ServiceEndpointFaultObj.getIncreseRequestCount()
+              )
+            } else if (ServiceEndpointFaultObj.getRequestMultiplier() > 0) {
+              metricsInThisTimeSlot.multiplyEntryPointRequestCount(
+                uniqueEndpointName,
+                ServiceEndpointFaultObj.getRequestMultiplier(),
+              )
+            }
+          }
+        }
+      }
+
+      // Service-level faults for reduce-instance / increase-instance
       const serviceFaultRecordInThisTime = allServiceFaultRecords.get(timeSlotKey);
       if (serviceFaultRecordInThisTime) {
         for (const [uniqueServiceName, ServiceFaultObj] of serviceFaultRecordInThisTime.entries()) {
@@ -58,7 +98,7 @@ export default class FaultInjector {
           const reducedReplicaCount = ServiceFaultObj.getReducedReplicaCount ? ServiceFaultObj.getReducedReplicaCount() : 0;
           const increaseReplicaCount = ServiceFaultObj.getIncreasedReplicaCount ? ServiceFaultObj.getIncreasedReplicaCount() : 0;
 
-          const instanceChange = increaseReplicaCount - reducedReplicaCount
+          const instanceChange = increaseReplicaCount - reducedReplicaCount;
 
           // Change the number of service replicas
           if (instanceChange < 0) {
@@ -100,7 +140,8 @@ export default class FaultInjector {
     // basicReplicaCountList: TReplicaCount[]
   ): {
     allEndpointFaultRecords: Map<string, Map<string, EndpointFault>>,
-    allServiceFaultRecords: Map<string, Map<string, ServiceFault>>
+    allServiceFaultRecords: Map<string, Map<string, ServiceFault>>,
+    allServiceLevelEndpointFaultRecords: Map<string, Map<string, EndpointFault>>
     /*
       allEndpointFaultRecords:
         -key:"day-hour-minute" 
@@ -113,13 +154,20 @@ export default class FaultInjector {
         -value:
           -key:uniqueServiceName
           -value:ServiceFault object
+
+      allServiceLevelEndpointFaultRecords:
+        -key:"day-hour-minute" 
+        -value:
+          -key:uniqueServiceName
+          -value:EndpointFault object
     */
   } {
 
     const allEndpointFaultRecords = new Map<string, Map<string, EndpointFault>>();
     const allServiceFaultRecords = new Map<string, Map<string, ServiceFault>>();
+    const allServiceLevelEndpointFaultRecords = new Map<string, Map<string, EndpointFault>>();
 
-    if (!loadSimulationSettings.faultInjection) return { allEndpointFaultRecords, allServiceFaultRecords }
+    if (!loadSimulationSettings.faultInjection) return { allEndpointFaultRecords, allServiceFaultRecords, allServiceLevelEndpointFaultRecords };
 
     const simulationDurationInDays = loadSimulationSettings.config.simulationDurationInDays;
 
@@ -129,20 +177,21 @@ export default class FaultInjector {
         const timeSlotKey = `${day}-${hour}-0`;
         allEndpointFaultRecords.set(timeSlotKey, new Map<string, EndpointFault>());
         allServiceFaultRecords.set(timeSlotKey, new Map<string, ServiceFault>());
+        allServiceLevelEndpointFaultRecords.set(timeSlotKey, new Map<string, EndpointFault>());
       }
     }
 
     loadSimulationSettings.faultInjection.forEach(fault => {
       /*
-        ?????? fault ???????????? map??key: timeSlot, value: array of probabilities??
-        ????????????????????????????????????????????????????????????????????????????????
-        ??????
-          ?????????????? day1 startHour 0 duration 3 percent 80 
+        建立該 fault 的時間段機率 map（key: timeSlot, value: array of probabilities）
+        若同一筆故障設定中，管理員設了多個時間段，但不小心出現時間重疊情況，則機率會重疊
+        例如：
+          第一個時間段是 day1 startHour 0 duration 3 percent 80 
             => {"0-0-0": 0.8, "0-0-1": 0.8, "0-0-2": 0.8}
-          ?????????????? day1 startHour 2 duration 2 percent 60 
+          第二個時間段是 day1 startHour 2 duration 2 percent 60 
             => {"0-0-2": 0.6, "0-0-3": 0.6}
-        ??????"0-0-2"????????????????0.8??0.6????"0-0-2"??????????1 - ?????????????? = 0.92 (92%)
-        ???????? map??????
+        在時間"0-0-2"會同時有兩個機率0.8跟0.6，則"0-0-2"發生機率為1 - 都不發生的機率 = 0.92 (92%)
+        合併完的 map就是：
             => {"0-0-0": 0.8, "0-0-1": 0.8, "0-0-2": 0.92, "0-0-3": 0.6}
       */
       const rawProbGroupMap = new Map<string, number[]>();
@@ -161,11 +210,11 @@ export default class FaultInjector {
       });
       const timeSlotProbMap = new Map<string, number>();
       for (const [timeSlotKey, probs] of rawProbGroupMap.entries()) {
-        const noneProb = probs.reduce((acc, p) => acc * (1 - p), 1);//??????????o??????????????v
+        const noneProb = probs.reduce((acc, p) => acc * (1 - p), 1);//都不發生的機率
         timeSlotProbMap.set(timeSlotKey, 1 - noneProb);
       }
 
-      // ??G??????`??J
+      // 故障注入
       for (const [timeSlotKey, prob] of timeSlotProbMap.entries()) {
         const isFaultOccur = Math.random() <= prob;
         if (!isFaultOccur) continue;
@@ -180,7 +229,9 @@ export default class FaultInjector {
 
         if (isLatency || isErrorRate || isTrafficInjection) {// Endpoint faults
           const epFaultRecordInThisTimeSlot = allEndpointFaultRecords.get(timeSlotKey);
+          const svcLevelFaultRecordInThisTimeSlot = allServiceLevelEndpointFaultRecords.get(timeSlotKey);
           if (!epFaultRecordInThisTimeSlot) continue;
+          if (!svcLevelFaultRecordInThisTimeSlot) continue;
 
           const latency = isLatency ? fault.increaseLatencyMs : 0;
           const errorRatePercent = isErrorRate ? fault.increaseErrorRatePercent : 0;
@@ -203,6 +254,20 @@ export default class FaultInjector {
             if (reqMultiplier) {
               faultObj.setRequestMultiplier(reqMultiplier);
             }
+          });
+
+          // Add fault records for each target service (service-level endpoint faults)
+          fault.targets.services.forEach(svc => {
+            const uniqueServiceName = svc.uniqueServiceName!;
+            let faultObj = svcLevelFaultRecordInThisTimeSlot.get(uniqueServiceName);
+            if (!faultObj) {
+              faultObj = new EndpointFault();
+              svcLevelFaultRecordInThisTimeSlot.set(uniqueServiceName, faultObj);
+            }
+            faultObj.setIncreaseLatency(latency);
+            faultObj.setIncreaseErrorRatePercent(errorRatePercent);
+            if (reqCount) faultObj.setIncreseRequestCount(reqCount);
+            if (reqMultiplier) faultObj.setRequestMultiplier(reqMultiplier);
           });
 
         } else if (isReduceInstance || isIncreaseInstance) {// Service faults
@@ -230,11 +295,12 @@ export default class FaultInjector {
 
     return {
       allEndpointFaultRecords,
-      allServiceFaultRecords
+      allServiceFaultRecords,
+      allServiceLevelEndpointFaultRecords
     }
   }
 }
-//??????
+//測試用
 function printNestedFaultRecords(
   faultRecords: Map<string, Map<string, EndpointFault | ServiceFault>>,
   isEndpointFault: boolean
