@@ -41,7 +41,7 @@ export default class RiskAnalyzer {
     });
 
     const normRisk = Normalizer.Numbers(
-      risks.map(({ risk }) => risk),
+      risks.map(({ risk }) => (isFinite(risk) ? risk : 0)),
       Normalizer.Strategy.BetweenFixedNumber
     );
 
@@ -107,7 +107,7 @@ export default class RiskAnalyzer {
 
     const baseProbMap = new Map(baseProb);
     const rawProb = reliabilityMetric.map(({ uniqueServiceName, norm }) => {    // Probability(S)
-      const prob = baseProbMap.get(uniqueServiceName)!;
+      const prob = baseProbMap.get(uniqueServiceName) ?? this.MINIMUM_PROB;
       return {
         uniqueServiceName,
         probability:

@@ -94,7 +94,8 @@ export class HistoricalData {
 
     this._historicalData.services.forEach((s) => {
       if (riskMap.has(s.uniqueServiceName)) {
-        s.risk = riskMap.get(s.uniqueServiceName)!.norm;
+        const norm = riskMap.get(s.uniqueServiceName)?.norm;
+        s.risk = (norm != null && isFinite(norm)) ? norm : 0;
       }
     });
     return this;

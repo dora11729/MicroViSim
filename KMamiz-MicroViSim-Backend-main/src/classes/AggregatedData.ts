@@ -52,9 +52,10 @@ export class AggregatedData {
     const totalRequests = a.totalRequests + b.totalRequests;
     a.totalRequestErrors += b.totalRequestErrors;
     a.totalServerErrors += b.totalServerErrors;
-    a.avgRisk =
-      (a.totalRequests / totalRequests) * a.avgRisk +
-      (b.totalRequests / totalRequests) * b.avgRisk;
+    a.avgRisk = totalRequests > 0
+      ? (a.totalRequests / totalRequests) * a.avgRisk +
+        (b.totalRequests / totalRequests) * b.avgRisk
+      : (a.avgRisk + b.avgRisk) / 2;  // 兩者都是零流量時，取平均
     a.endpoints = this.mergeAggregateEndpointInfo(a.endpoints, b.endpoints);
     return { ...a, totalRequests };
   }
