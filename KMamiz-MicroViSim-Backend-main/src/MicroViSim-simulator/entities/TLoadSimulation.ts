@@ -148,7 +148,9 @@ export class TCMetricsPerTimeSlot {
     this._entryPointRequestCountMap = new Map(newMap);
   }
   setEndpointDelayMap(newMap: Map<string, TSimulationEndpointDelay[]>): void {
-    this._endpointDelayMap = new Map(newMap);
+    this._endpointDelayMap = new Map(
+      [...newMap.entries()].map(([k, v]) => [k, v.map(d => ({ ...d }))])
+    );
   }
   setEndpointMaxLatencyMap(newMap: Map<string, number>): void {
     this._endpointMaxLatency = new Map(newMap);

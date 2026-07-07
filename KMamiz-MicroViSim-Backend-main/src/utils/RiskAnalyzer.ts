@@ -45,7 +45,33 @@ export default class RiskAnalyzer {
       Normalizer.Strategy.BetweenFixedNumber
     );
 
-    return risks.map((r, i) => ({ ...r, norm: normRisk[i] }));
+    const result = risks.map((r, i) => ({ ...r, norm: normRisk[i] }));
+
+    // if replicas = 0, then risk = 1
+    const coveredServices = new Set(risks.map(r => r.uniqueServiceName));
+    for (const rep of replicas) {
+      if (rep.replicas !== 0) continue;
+      if (coveredServices.has(rep.uniqueServiceName)) {
+        // request != 0
+        const idx = result.findIndex(r => r.uniqueServiceName === rep.uniqueServiceName);
+        if (idx !== -1) result[idx] = { ...result[idx], norm: 1, risk: 1 };
+      } else {
+        // request = 0
+        const [service, namespace, version] = rep.uniqueServiceName.split('\t');
+        result.push({
+          uniqueServiceName: rep.uniqueServiceName,
+          service,
+          namespace,
+          version,
+          risk: 1,
+          impact: 1,
+          probability: 1,
+          norm: 1,
+        });
+      }
+    }
+
+    return result;
   }
 
   static Impact(dependencies: TServiceDependency[], replicas: TReplicaCount[]) {
@@ -251,7 +277,7 @@ export default class RiskAnalyzer {
     const mean = input.reduce((a, b) => a + b) / input.length;
     const standardDeviation = Math.sqrt(
       input.reduce((a, b) => a + Math.pow(b, 2), 0) / input.length -
-        Math.pow(mean, 2)
+      Math.pow(mean, 2)
     );
     return mean !== 0 ? standardDeviation / mean : 0;
   }
