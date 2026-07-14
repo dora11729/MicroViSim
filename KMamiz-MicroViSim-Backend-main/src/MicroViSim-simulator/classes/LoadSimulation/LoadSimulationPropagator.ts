@@ -71,9 +71,13 @@ export default class LoadSimulationPropagator {
         for (const metric of endpointMetrics) {
           const gradualDriftDelay = metric.delay?.find(d => d.type === "gradualDrift");
           if (gradualDriftDelay && gradualDriftDelay.type === "gradualDrift") {
+            const requestCount = propagationResultAtThisTimeSlot.get(metric.uniqueEndpointName ?? "")?.requestCount ?? 0;
             this.latencySimulator.advanceDrift(
               metric.uniqueEndpointName ?? "",
               gradualDriftDelay.driftRate ?? 0,
+              requestCount,
+              gradualDriftDelay.driftMode ?? "request",
+              gradualDriftDelay.recoveryRate ?? 2
             );
           }
 

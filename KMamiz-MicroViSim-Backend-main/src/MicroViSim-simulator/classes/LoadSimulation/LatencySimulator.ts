@@ -161,10 +161,32 @@ export default class LatencySimulator {
         this.driftAccumulator.clear();
     }
 
-    advanceDrift(endpointName: string, driftRate: number): void {
+    advanceDrift(
+        endpointName: string, 
+        driftRate: number,
+        requestCount: number,
+        driftMode: string,  // "time" | "request" | "request-with-recovery"
+        recoveryRate: number,
+    ): void {
         const prev = this.driftAccumulator.get(endpointName) ?? 0;
-        const next = prev + driftRate;
-        this.driftAccumulator.set(endpointName, next);
+        
+        if (driftMode === "time") {
+            // 不管流量，每 slot 固定累積
+            this.driftAccumulator.set(endpointName, prev + driftRate);
+        } else if (driftMode === "request" && requestCount > 0) {
+            // 有流量累積，無流量凍結
+            this.driftAccumulator.set(endpointName, prev + driftRate);
+        } else {
+            // 有流量累積，無流量緩慢回退
+            if (requestCount > 0) {
+                this.driftAccumulator.set(endpointName, prev + driftRate);
+            } else {
+                this.driftAccumulator.set(
+                    endpointName,
+                    Math.max(0, prev - recoveryRate)
+                );
+            }
+        }
     }
 
     private computeGradualDrift(

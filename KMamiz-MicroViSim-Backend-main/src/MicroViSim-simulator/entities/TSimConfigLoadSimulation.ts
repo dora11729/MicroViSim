@@ -133,7 +133,12 @@ const gradualDriftDelaySchema = baseDelaySchema.extend({
   }),
   driftRate: z.number().min(0, {
     message: "driftRate must be zero or greater.",
-  }).default(4)
+  }).default(4),
+  driftMode: z.enum(["time", "request", "request-with-recovery"])
+    .default("request"),
+  recoveryRate: z.number().min(0, {
+    message: "recoveryRate must be zero or greater.",
+  }).default(2),
 });
 
 const loadDrivenDelaySchema = baseDelaySchema.extend({
