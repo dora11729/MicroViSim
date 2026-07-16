@@ -6,8 +6,11 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Button,
+  CircularProgress,
 } from "@mui/material";
 import { makeStyles } from "@mui/styles";
+import DownloadIcon from "@mui/icons-material/Download";
 import { useEffect, useState } from "react";
 import LineChartUtils from "../classes/LineChartUtils";
 import LineChart from "../components/LineChart";
@@ -46,9 +49,9 @@ const useStyles = makeStyles(() => ({
 export default function Metrics() {
   const classes = useStyles();
   const [timeOffset, setTimeOffset] = useState<number>(Config.backendConfig.SimulatorMode ? -86400 * 7 : 1800); //display data for the last 30 minutes by default
-  const [mappedHistoricalData, setMappedHistoricalData] =
-    useState<TLineChartData>();
+  const [mappedHistoricalData, setMappedHistoricalData] = useState<TLineChartData>();
   const [statistics, setStatistics] = useState<TServiceStatistics[]>([]);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     const unsubscribe = [
@@ -56,10 +59,7 @@ export default function Metrics() {
         setMappedHistoricalData, timeOffset * 1000,
       ),
     ];
-
-    return () => {
-      unsubscribe.forEach((un) => un());
-    };
+    return () => { unsubscribe.forEach((un) => un()); };
   }, [timeOffset]);
 
   useEffect(() => {
@@ -68,9 +68,7 @@ export default function Metrics() {
         setStatistics, timeOffset * 1000
       ),
     ];
-    return () => {
-      unsubscribeStatistics.forEach((uns) => uns());
-    };
+    return () => { unsubscribeStatistics.forEach((uns) => uns()); };
   }, [timeOffset]);
 
   const areaCharts: {
@@ -79,16 +77,7 @@ export default function Metrics() {
     options?: any;
   }[] = [
       { name: "Requests", field: "requests" },
-      {
-        name: "Risks",
-        field: "risk",
-        options: {
-          yaxis: {
-            max: 1,
-            min: 0,
-          },
-        },
-      },
+      { name: "Risks", field: "risk", options: { yaxis: { max: 1, min: 0 } } },
       { name: "RequestErrors", field: "requestErrors" },
       { name: "Service Errors", field: "serverErrors" },
       { name: "Latency (Coefficient of Variation)", field: "latencyCV" },
@@ -96,21 +85,11 @@ export default function Metrics() {
       { name: "LatencyMean (No Downstream)", field: "latencyMeanNoDownstream" },
       { name: "LatencyP95", field: "latencyP95" },
       { name: "Replicas", field: "replicas" },
-      {
-        name: "Utilization",
-        field: "utilization",
-        options: {
-          yaxis: {
-            min: 0,
-          },
-        },
-      },
+      { name: "Utilization", field: "utilization", options: { yaxis: { min: 0 } } },
     ];
 
-  const statisticsTimeOptions = (Config.backendConfig.SimulatorMode
-    ? [
-      { label: 'simulation', value: 0},
-    ]
+  const statisticsTimeOptions = Config.backendConfig.SimulatorMode
+    ? [{ label: 'simulation', value: 0 }]
     : [
       { label: 'last 10 min', value: 600 },
       { label: 'last 30 min', value: 1800 },
@@ -120,14 +99,48 @@ export default function Metrics() {
       { label: 'last 12 hr', value: 43200 },
       { label: 'last 1 day', value: 86400 },
       { label: 'last 7 days', value: 86400 * 7 },
-    ]
-  );
+    ];
+
+  function delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function downloadAll() {
+    setDownloading(true);
+    try {
+      const toolbars = document.querySelectorAll(".apexcharts-toolbar");
+
+      // PNG
+      for (const toolbar of Array.from(toolbars)) {
+        const menuIcon = toolbar.querySelector(".apexcharts-menu-icon") as HTMLElement;
+        menuIcon?.click();
+        await delay(100);
+        const menuItems = toolbar.querySelectorAll(".apexcharts-menu-item");
+        const pngItem = Array.from(menuItems).find(el => el.textContent === "Download PNG") as HTMLElement;
+        pngItem?.click();
+        await delay(300);
+      }
+
+      // CSV
+      for (const toolbar of Array.from(toolbars)) {
+        const menuIcon = toolbar.querySelector(".apexcharts-menu-icon") as HTMLElement;
+        menuIcon?.click();
+        await delay(100);
+        const menuItems = toolbar.querySelectorAll(".apexcharts-menu-item");
+        const csvItem = Array.from(menuItems).find(el => el.textContent === "Download CSV") as HTMLElement;
+        csvItem?.click();
+        await delay(300);
+      }
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   return (
     <Box className={classes.root}>
-      {!Config.backendConfig.SimulatorMode && (
-        <Grid container padding={1} spacing={0.5} className={classes.pageHeader}>
-          <Grid item xs={12} margin="1em 1em 0 0" >
+      <Grid container padding={1} spacing={0.5} className={classes.pageHeader}>
+        <Grid item xs={12} margin="1em 1em 0 0" style={{ display: "flex", alignItems: "center" }}>
+          {!Config.backendConfig.SimulatorMode && (
             <FormControl className={classes.select}>
               <InputLabel id="lt-label">Time Offset</InputLabel>
               <Select
@@ -143,9 +156,18 @@ export default function Metrics() {
                 ))}
               </Select>
             </FormControl>
-          </Grid>
+          )}
+          <Button
+            variant="contained"
+            startIcon={downloading ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
+            onClick={downloadAll}
+            disabled={downloading || !mappedHistoricalData}
+          >
+            {downloading ? "Downloading..." : "Download All"}
+          </Button>
         </Grid>
-      )}
+      </Grid>
+
       <Grid container className={classes.pageBody}>
         {mappedHistoricalData
           ? areaCharts.map((c) => (
@@ -153,10 +175,7 @@ export default function Metrics() {
               <LineChart
                 title={c.name}
                 filename={c.field}
-                series={LineChartUtils.MappedBaseDataToSeriesData(
-                  mappedHistoricalData,
-                  c.field
-                )}
+                series={LineChartUtils.MappedBaseDataToSeriesData(mappedHistoricalData, c.field)}
                 overwriteOptions={c.options}
               />
             </Grid>
