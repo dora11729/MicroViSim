@@ -1,4 +1,5 @@
-此為承接 林維凱學長 之新版 MicroViSim，以下為原始 repo 連結：
+This is the new version of MicroViSim, based on Wei-Kai Lin's work. The original repository is linked below:
+
 
 Frontend：https://github.com/wys899195/KMamiz-MicroViSim-Frontend.git
 
