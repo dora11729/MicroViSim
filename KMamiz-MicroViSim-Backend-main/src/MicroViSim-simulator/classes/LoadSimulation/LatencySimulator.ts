@@ -11,8 +11,7 @@ export default class LatencySimulator {
     // private preRequestCountMap = new Map<string, number>(); // 上一個 slot 的 request count，用於 Gradual Drift 計算
 
     /**
-     * 將 latencyMs (ms) 和 jitterMs (ms) 轉換成 LogNormal 參數
-     * latencyMs 是目標平均值，jitterMs 是目標標準差
+     * 將 latencyMs (ms) 和 jitterMs (ms) 轉換成 LogNormal 參數: 對數均值 μ 與對數標準差 σ
      */
     private toLogNormalParams(mean: number, std: number): { mu: number; sigma: number } {
         // 從實際的 mean/std 反推 LogNormal 的 mu/sigma
@@ -21,8 +20,8 @@ export default class LatencySimulator {
         return { mu, sigma: Math.sqrt(sigma2) };
     }
 
-    /*
-    Use AR(1) process to smooth the random noise (epsilon) for more realistic latency simulation.
+    /**
+     * Use AR(1) process to smooth the random noise (epsilon) for more realistic latency simulation.
      */
     private applyAR1(endpointName: string, epsilon: number, phi = 0.7): number {
         const prev = this.epsilonState.get(endpointName) ?? 0;
@@ -59,14 +58,14 @@ export default class LatencySimulator {
                 case "jitter":
                     total += this.computeStable(endpointName, delay.latencyMs, delay.jitterMs * 3);
                     break;
-                case "spike":
-                    total += this.computeSpike(endpointName, serviceName, delay, total);
-                    break;
                 case "gradualDrift":
                     total += this.computeGradualDrift(endpointName, delay);
                     break;
                 case "loadDriven":
                     total += this.computeLoadDriven(endpointName, delay, requestCount, capacity);
+                    break;
+                case "spike":
+                    total += this.computeSpike(endpointName, serviceName, delay, total);
                     break;
             }
         }
@@ -128,7 +127,7 @@ export default class LatencySimulator {
         const effectiveBase = latencyMs > 0 ? latencyMs : baseLatency;
 
         if (isActive) {
-            return this.computeStable(endpointName, effectiveBase * spikeMagnitude, jitterMs);
+            return this.computeStable(endpointName, effectiveBase * spikeMagnitude, jitterMs, false);
         }
         return this.computeStable(endpointName, latencyMs, jitterMs);
     }
@@ -200,7 +199,7 @@ export default class LatencySimulator {
 
         const driftedLatency = latencyMs + accumulated;
 
-        return this.computeStable(endpointName, driftedLatency, jitterMs, false);
+        return this.computeStable(endpointName, driftedLatency, jitterMs);
     }
 
     private computeLoadDriven(
