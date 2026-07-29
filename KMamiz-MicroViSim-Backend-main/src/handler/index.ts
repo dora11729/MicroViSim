@@ -6,5 +6,6 @@ export { default as AlertService } from "./AlertService";
 export { default as ConfigurationService } from "./ConfigurationService";
 export { default as ComparatorService } from "./ComparatorService";
 export { default as SimulationService } from "../MicroViSim-simulator/handler/SimulationService";
+export { default as ConverterHandler } from "../MicroViSim-simulator/classes/SimConfigConverter/ConverterHandler";
 
 

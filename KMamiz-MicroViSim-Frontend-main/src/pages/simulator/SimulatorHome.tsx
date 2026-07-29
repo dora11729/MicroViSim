@@ -15,6 +15,7 @@ import ComparatorService from "../../services/ComparatorService";
 import YAML from 'yaml';
 import Swal from 'sweetalert2'
 import withReactContent from 'sweetalert2-react-content'
+import { useNavigate } from "react-router-dom";
 
 const SwalHandler = withReactContent(Swal);
 
@@ -83,6 +84,7 @@ const useStyles = makeStyles(() => ({
 
 export default function SimulatorHome() {
   const classes = useStyles();
+  const navigate = useNavigate();
 
   const [yamlInput, setYamlInput] = useState(() => {
     return "";
@@ -439,6 +441,15 @@ export default function SimulatorHome() {
                 className={classes.button}
               >
                 {loading ? 'Loading...' : 'Upload Training Dataset'}
+              </Button>
+              <Button
+                variant="contained"
+                onClick={() => navigate("/converter")}
+                disabled={loading}
+                className={classes.button}
+                sx={{ background: "linear-gradient(90deg, #1565c0, #6a1b9a)", color: "#fff" }}
+              >
+                {loading ? 'Loading...' : 'Open Converter'}
               </Button>
               <input
                 ref={fileInputRef}

@@ -23,6 +23,7 @@ import {
   Notifications,
   NotificationsActive,
   StackedLineChart,
+  AutoFixHigh,
 } from "@mui/icons-material";
 import FlashOnIcon from "@mui/icons-material/FlashOn"; 
 import { useNavigate } from "react-router-dom";
@@ -47,6 +48,7 @@ export default function Header() {
     { name: "Dependency Graph", path: "/", icon: <BubbleChart /> },
     { name: "Metrics", path: "/metrics", icon: <StackedLineChart /> },
     { name: "Insights", path: "/insights", icon: <BarChart /> },
+    { name: "Converter", path: "/converter", icon: <AutoFixHigh /> },
     { name: "Endpoints", path: "/endpoints", icon: <LocalOffer /> },
     { name: "Interfaces", path: "/interfaces", icon: <Code /> },
     
