@@ -90,7 +90,7 @@ const TYPE_COLOR: Record<
 const DEFAULT_OPTIONS: Required<
   Pick<
     ConverterRunOptions,
-    | "slotsPerHour"
+    | "slotDurationSeconds"
     | "driftDetectionThresholdMs"
     | "lowLoadThresholdPct"
     | "searchRangePct"
@@ -103,7 +103,8 @@ const DEFAULT_OPTIONS: Required<
   fanOutFactors: string;
   mapeWeights: { latency: string; errorRate: string; rps: string };
 } = {
-  slotsPerHour: 1,
+  // 0 = derive the bucket size from the CSV's own sampling interval (the normal case).
+  slotDurationSeconds: 0,
   fanOutFactors: "{}",
   driftDetectionThresholdMs: 2.0,
   lowLoadThresholdPct: 0.5,
@@ -164,7 +165,8 @@ function buildRunOptions(form: typeof DEFAULT_OPTIONS): ConverterRunOptions {
   }
 
   return {
-    slotsPerHour: form.slotsPerHour,
+    // Omit entirely when 0 so the backend derives it from the data.
+    ...(form.slotDurationSeconds > 0 ? { slotDurationSeconds: form.slotDurationSeconds } : {}),
     fanOutFactors: parseJsonField(form.fanOutFactors, "fanOutFactors") as Record<string, number>,
     driftDetectionThresholdMs: form.driftDetectionThresholdMs,
     lowLoadThresholdPct: form.lowLoadThresholdPct,
@@ -539,13 +541,13 @@ export default function Converter() {
                   <Grid container spacing={2}>
                     <Grid item xs={12} sm={6}>
                       <TextField
-                        label="slotsPerHour"
+                        label="slotDurationSeconds"
                         size="small"
                         fullWidth
                         type="number"
-                        value={options.slotsPerHour}
-                        onChange={(e) => updateOption("slotsPerHour", parseInt(e.target.value, 10) || 1)}
-                        helperText="MicroViSim time slots per hour (usually 1)"
+                        value={options.slotDurationSeconds}
+                        onChange={(e) => updateOption("slotDurationSeconds", parseInt(e.target.value, 10) || 0)}
+                        helperText="0 = derive from the CSV's sampling interval (recommended)"
                       />
                     </Grid>
                     <Grid item xs={12} sm={6}>
@@ -893,6 +895,27 @@ export default function Converter() {
                       <MapeBadge value={ep.mape.errorRate} label="Error rate" />
                       <MapeBadge value={ep.mape.rps} label="RPS" />
                     </Box>
+                    {ep.slotModel && (
+                      <Box mb={1.5}>
+                        <Typography variant="caption" color="text.secondary" display="block">
+                          Calibrated on {ep.slotModel.slotCount} × {ep.slotModel.slotDurationSeconds}s
+                          slots ({Math.round(ep.slotModel.observedSpanSeconds / 60)} min observed);
+                          MAPE over {ep.mape.comparedSlotCount} comparable slot
+                          {ep.mape.comparedSlotCount === 1 ? "" : "s"}
+                        </Typography>
+                        {ep.slotModel.notes.map((note, i) => (
+                          <Typography
+                            key={i}
+                            variant="caption"
+                            color="warning.main"
+                            display="block"
+                            sx={{ mt: 0.5 }}
+                          >
+                            ⚠ {note}
+                          </Typography>
+                        ))}
+                      </Box>
+                    )}
                     <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
                       Selected delay types
                     </Typography>

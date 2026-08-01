@@ -7,6 +7,9 @@
  *   metric_name,timestamp,metric_value,check,error,error_code,expected_response,
  *   group,method,name,proto,scenario,service,status,subproto,tls_version,url
  *
+ * Standard format:
+ *   timestamp,service,endpoint,rps,p50_ms,p95_ms,error_rate,replica_count
+ * 
  * Relevant metric_name values:
  *   http_req_duration   → p50 / p95 latency
  *   http_reqs           → RPS
@@ -16,6 +19,8 @@
  *   const standardCsv = new K6CsvConverter().convert(k6RawCsv, serviceEndpointMap);
  *   const metrics = new MetricsExtractor().extract(standardCsv);
  */
+
+import { parseCsvLine } from "./CsvLineParser";
 
 export interface K6ServiceEndpointConfig {
   /**
@@ -39,12 +44,6 @@ interface K6RawRow {
   metricValue: number;
   name: string;      // k6 request name tag
   status: string;    // HTTP status code
-}
-
-interface SlotKey {
-  minuteTimestamp: string; // ISO minute-truncated
-  service: string;
-  endpoint: string;
 }
 
 interface SlotAccumulator {
@@ -82,7 +81,7 @@ export class K6CsvConverter {
     // k6 --out csv is comma-delimited, but accepting tab-delimited exports
     // makes files that were opened/saved by spreadsheet tools usable too.
     const delimiter = lines[0].includes("\t") ? "\t" : ",";
-    const header = lines[0].replace(/^\uFEFF/, "").split(delimiter).map(h => h.trim().toLowerCase());
+    const header = parseCsvLine(lines[0].replace(/^\uFEFF/, ""), delimiter).map(h => h.trim().toLowerCase());
 
     const idx = {
       metricName:  header.indexOf("metric_name"),
@@ -103,7 +102,7 @@ export class K6CsvConverter {
     const result: K6RawRow[] = [];
 
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(delimiter);
+      const cols = parseCsvLine(lines[i], delimiter);
       if (cols.length <= Math.max(...Object.values(idx))) continue;
 
       const metricName = cols[idx.metricName]?.trim();
@@ -116,12 +115,17 @@ export class K6CsvConverter {
       );
       if (isNaN(ts.getTime())) continue;
 
+      // A malformed metric_value would otherwise silently poison every downstream
+      // sum/median (NaN propagates through += and Math.max/percentile unnoticed).
+      const metricValue = parseFloat(cols[idx.metricValue] ?? "0");
+      if (isNaN(metricValue)) continue;
+
       result.push({
         metricName,
-        timestamp:   ts,
-        metricValue: parseFloat(cols[idx.metricValue] ?? "0"),
-        name:        cols[idx.name]?.trim() ?? "",
-        status:      cols[idx.status]?.trim() ?? "",
+        timestamp: ts,
+        metricValue,
+        name:      cols[idx.name]?.trim() ?? "",
+        status:    cols[idx.status]?.trim() ?? "",
       });
     }
 

@@ -3,6 +3,20 @@ export interface MapeScores {
   errorRate: number;
   rps: number;
   weighted: number;
+  weightedStdDev: number;
+  sampleCount: number;
+  /** How many time slots were actually comparable when scoring. */
+  comparedSlotCount: number;
+}
+
+/** How the observed data was bucketed, and what had to be extrapolated to emit it. */
+export interface SlotModel {
+  slotDurationSeconds: number;
+  nativeIntervalSeconds: number;
+  slotCount: number;
+  observedSpanSeconds: number;
+  reason: string;
+  notes: string[];
 }
 
 export interface ConvertedEndpoint {
@@ -25,6 +39,7 @@ export interface ConvertedEndpoint {
   mape: MapeScores;
   selectedTypes: string[];
   selectionReasons: Record<string, string>;
+  slotModel: SlotModel;
 }
 
 export interface ConverterResult {
@@ -37,7 +52,8 @@ export interface ConverterResult {
 }
 
 export interface ConverterRunOptions {
-  slotsPerHour?: number;
+  /** Force a bucket size instead of deriving one from the CSV's sampling interval. */
+  slotDurationSeconds?: number;
   fanOutFactors?: Record<string, number>;
   driftDetectionThresholdMs?: number;
   lowLoadThresholdPct?: number;
@@ -47,6 +63,7 @@ export interface ConverterRunOptions {
   spikeRatioThreshold?: number;
   loadCorrelationThreshold?: number;
   jitterCvThreshold?: number;
+  mapeSamplesPerCandidate?: number;
 }
 
 export interface K6ConverterConfig {

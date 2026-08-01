@@ -4,6 +4,9 @@
  * Adapts LoadSimulationPropagator to the ISimulatorRunner interface
  * required by ConverterService.
  *
+ * Runs the calibration at the CSV's own time resolution (slotDurationSeconds), which
+ * is generally NOT one hour. See the rho comment in runEndpoint for how that is made
+ * to work against a simulator whose slot is hardcoded to an hour.
  */
 
 import LoadSimulationPropagator from "../LoadSimulation/LoadSimulationPropagator";
@@ -18,11 +21,25 @@ import { TSimulationEndpointMetric } from "../../entities/TSimConfigLoadSimulati
 export class SimulatorRunnerAdapter implements ISimulatorRunner {
     private readonly propagator = new LoadSimulationPropagator();
 
-    // Grid search 期間每個 slot 最多模擬的 request 數。
-    // 縮放不影響成功/失敗比例（error injection 是逐請求機率抽樣，子取樣不改變期望比例），
-    // 但會影響 loadDriven 的使用率（rho = requestCount / capacityPerHour）——
-    // 因此 capacity 必須用同一個縮放係數同步縮小，見下方迴圈。
-    private static readonly MAX_REQUESTS_PER_SLOT = 100;
+    /**
+     * Total simulated requests per run, summed over all slots. Bounding the TOTAL rather
+     * than the per-slot count keeps grid-search cost independent of slot count:
+     * cost ≈ MAX_REQUESTS_PER_RUN × candidates × mapeSamplesPerCandidate.
+     *
+     * Down-scaling doesn't change success/failure ratios (error injection is a per-request
+     * Bernoulli draw, so subsampling preserves the expected ratio), but it DOES change
+     * loadDriven's utilisation — which is why the capacity is scaled by the same factor
+     * in the loop below.
+     */
+    private static readonly MAX_REQUESTS_PER_RUN = 6000;
+
+    /**
+     * Floor so the per-slot mean latency stays a usable estimate at high slot counts.
+     * At n=50 with a latency CV around 0.3 the per-slot mean carries ~4% noise, which
+     * shows up as a roughly constant offset in every candidate's MAPE and so does not
+     * affect ranking.
+     */
+    private static readonly MIN_REQUESTS_PER_SLOT = 50;
 
     runEndpoint(params: SimulatorRunParams): SimulatorRunResult {
         const {
@@ -30,8 +47,9 @@ export class SimulatorRunnerAdapter implements ISimulatorRunner {
             endpoint,
             delays,
             capacityPerReplica,
-            hourlyRps,
-            replicaCount,
+            slotRps,
+            slotReplicaCount,
+            slotDurationSeconds,
             errorRate,
         } = params;
 
@@ -63,37 +81,66 @@ export class SimulatorRunnerAdapter implements ISimulatorRunner {
 
         const dependOnMap: TDependOnMapWithCallProbability = new Map();
 
-        // ── 3. Map<string, TCMetricsPerTimeSlot>（24 個 hourly slot）─────────
+        // ── 3. Map<string, TCMetricsPerTimeSlot>（slotCount 個 slot）─────────
+
+        const slotCount = slotRps.length;
+        const perSlotCap = Math.max(
+            SimulatorRunnerAdapter.MIN_REQUESTS_PER_SLOT,
+            Math.floor(SimulatorRunnerAdapter.MAX_REQUESTS_PER_RUN / Math.max(1, slotCount)),
+        );
+
+        // capacityPerReplica is req/SECOND. LatencySimulator.computeLoadDriven
+        // unconditionally multiplies by 3600 (`capacityPerHour = capacity * 3600`)
+        // because the REAL simulator's slot is an hour. Pre-multiplying by (D / 3600)
+        // makes that hardcoded 3600 cancel, so rho reduces to the true
+        // rps / (capacityPerReplica * replicas) for ANY slot duration D:
+        //
+        //   rho = (rps·D·s) / (capacityPerReplica·s·(D/3600)·replicas·3600)
+        //       = rps / (capacityPerReplica·replicas)                        ✓
+        //
+        // The request-budget down-scaling folds into the same factor `s`, computed from
+        // the REALISED request count so rounding, capping and the max(1, …) floor
+        // cannot skew rho.
+        const hourFraction = slotDurationSeconds / 3600;
 
         const metricsPerTimeSlotMap = new Map<string, TCMetricsPerTimeSlot>();
+        const slotKeys: string[] = [];
 
-        for (let hour = 0; hour < 24; hour++) {
-            const rps = hourlyRps[hour] ?? 0;
-            const rawCount = Math.round(rps * 3600);
+        for (let i = 0; i < slotCount; i++) {
+            const rps = slotRps[i] ?? 0;
+            const replicaCount = Math.max(1, slotReplicaCount[i] ?? 1);
 
-            // 請求量與「用來算 loadDriven rho 的 capacity」套用同一個縮放係數，
-            // 讓 rho = scaledCount / (scaledCapacity*3600) 維持跟真實比例一致，
-            // 同時仍把模擬用的絕對請求量壓在 MAX_REQUESTS_PER_SLOT 以內。
-            const scale = rawCount > SimulatorRunnerAdapter.MAX_REQUESTS_PER_SLOT
-                ? SimulatorRunnerAdapter.MAX_REQUESTS_PER_SLOT / rawCount
-                : 1;
-            const scaled = rawCount === 0
-                ? 0
-                : Math.max(1, Math.round(rawCount * scale));
+            // Exact (fractional) demand for this slot, before rounding or capping.
+            const exactCount = rps * slotDurationSeconds;
+            // Always simulate at least one request when traffic was observed: a slot with
+            // zero simulated requests reports p50 = 0 against a non-zero observation,
+            // which is a structural 100% MAPE contribution.
+            const requestCount = exactCount > 0
+                ? Math.min(perSlotCap, Math.max(1, Math.round(exactCount)))
+                : 0;
+            const scale = exactCount > 0 ? requestCount / exactCount : 1;
 
             const slot = new TCMetricsPerTimeSlot();
-            slot.setEntryPointRequestCount(uniqueEndpointName, scaled);
+            slot.setEntryPointRequestCount(uniqueEndpointName, requestCount);
             slot.setServiceReplicaCount(uniqueServiceName, replicaCount);
-            // 只縮放這一小時內部用來算 rho 的 capacity；不會外洩到 ConverterService
-            // 的 grid search（那邊搜尋、回報的一直是真實、未縮放的 capacityPerReplica）。
-            slot.setServiceCapacityPerReplica(uniqueServiceName, capacityPerReplica * scale);
+            // Never 0: setServiceCapacityPerReplica clamps at 0, and a literal 0 would make
+            // capacityPerHour 0 and rho Infinity → clamped to 0.95 (fake saturation).
+            slot.setServiceCapacityPerReplica(
+                uniqueServiceName,
+                Math.max(1e-9, capacityPerReplica * scale * hourFraction),
+            );
             slot.setEndpointDelayMap(new Map([[uniqueEndpointName, delays]]));
             slot.setEndpointErrorRate(uniqueEndpointName, errorRate);
             slot.setEndpointMaxLatency(uniqueEndpointName, 0);
             slot.setEndpointTimeoutMs(uniqueEndpointName, 0);
 
-            // timeSlotKey 格式："day-hour-minute"，校準固定用 day=0, minute=0
-            metricsPerTimeSlotMap.set(`0-${hour}-0`, slot);
+            // The key is opaque on the calibration path — simulatePropagation only ever
+            // uses it as a Map key and iterates in insertion order. It is still emitted in
+            // a valid "day-hour-minute" shape so it stays debuggable and wouldn't silently
+            // collide if this map were ever routed through LoadSimulationHandler.
+            const key = `0-${Math.floor(i / 60)}-${i % 60}`;
+            slotKeys.push(key);
+            metricsPerTimeSlotMap.set(key, slot);
         }
 
         // ── 4. 執行模擬 ───────────────────────────────────────────────────────
@@ -105,42 +152,60 @@ export class SimulatorRunnerAdapter implements ISimulatorRunner {
             true,
         );
 
-        // ── 5. 萃取每小時 p50 / errorRate / rps ──────────────────────────────
+        // ── 5. 萃取每個 slot 的 p50 / errorRate / rps ────────────────────────
 
-        return this.extractResult(propagationResult, uniqueEndpointName, hourlyRps);
+        return this.extractResult(propagationResult, uniqueEndpointName, slotKeys, slotRps);
     }
 
     private extractResult(
         propagationResult: Map<string, Map<string, any>>,
         uniqueEndpointName: string,
-        hourlyRps: number[],
+        slotKeys: string[],
+        slotRps: number[],
     ): SimulatorRunResult {
-        const p50ByHour: number[] = [];
-        const errorRateByHour: number[] = [];
-        const rpsByHour: number[] = [];
+        const p50BySlot: number[] = [];
+        const errorRateBySlot: number[] = [];
+        const rpsBySlot: number[] = [];
+        const simulatedRequestCountBySlot: number[] = [];
+        const simulatedErrorCountBySlot: number[] = [];
 
-        for (let hour = 0; hour < 24; hour++) {
-            const slotResult = propagationResult.get(`0-${hour}-0`);
+        for (let i = 0; i < slotKeys.length; i++) {
+            const slotResult = propagationResult.get(slotKeys[i]);
             const epStats = slotResult?.get(uniqueEndpointName);
 
             if (!epStats || epStats.requestCount === 0) {
-                p50ByHour.push(0);
-                errorRateByHour.push(0);
-                rpsByHour.push(0);
+                p50BySlot.push(0);
+                errorRateBySlot.push(0);
+                rpsBySlot.push(0);
+                simulatedRequestCountBySlot.push(0);
+                simulatedErrorCountBySlot.push(0);
                 continue;
             }
 
-            // p50 ← status=200 的 mean latency（Welford mean，最接近 p50 的可用指標）
+            // p50 ← status=200 的 mean latency（Welford mean，最接近 p50 的可用指標）。
+            // 若該 slot 所有請求都失敗，latencyStatsByStatus 不會有 "200" 桶 → 0，
+            // ConverterService 的 mask 會把這種 slot 排除，而不是拿 0 去比。
             const latencyStats = epStats.latencyStatsByStatus?.get("200");
-            p50ByHour.push(latencyStats?.mean ?? 0);
+            p50BySlot.push(latencyStats?.mean ?? 0);
 
-            // errorRate ← ownErrorCount / requestCount
-            errorRateByHour.push(epStats.ownErrorCount / epStats.requestCount);
+            errorRateBySlot.push(epStats.ownErrorCount / epStats.requestCount);
+            simulatedRequestCountBySlot.push(epStats.requestCount);
+            simulatedErrorCountBySlot.push(epStats.ownErrorCount);
 
-            // rps ← 直接沿用觀測值（propagator 不改變 entry point RPS）
-            rpsByHour.push(hourlyRps[hour] ?? 0);
+            // rps ← 直接沿用觀測值。propagator 不會節流 entry point 的請求數
+            // （校準路徑繞過 OverloadErrorRateAndLatencyEstimator 與 autoscaling），
+            // 所以「模擬 rps」定義上就等於輸入 rps，這一項的 MAPE 因此恆為 0：
+            // 它是加在每個候選上的同一個常數，不影響排名，但會系統性地壓低回報的
+            // weighted 分數。真正有資訊量的是 simulatedRequestCountBySlot。
+            rpsBySlot.push(slotRps[i] ?? 0);
         }
 
-        return { p50ByHour, errorRateByHour, rpsByHour };
+        return {
+            p50BySlot,
+            errorRateBySlot,
+            rpsBySlot,
+            simulatedRequestCountBySlot,
+            simulatedErrorCountBySlot,
+        };
     }
 }

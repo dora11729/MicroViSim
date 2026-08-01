@@ -48,15 +48,25 @@ export default class ConverterHandler extends IRequestHandler {
 
       const options = this.parseOptions<ConverterRunOptions>(req.body.options);
 
-      // Layer 1
-      const metrics = new MetricsExtractor().extract(csvText);
+      // Same threshold feeds both layers: Layer 1 actually applies it to the baseline
+      // computation, Layer 2's diagnostics.lowLoadThresholdPct just echoes it back —
+      // they must not be allowed to drift apart.
+      const lowLoadThresholdPct = options.lowLoadThresholdPct ?? 0.5;
+
+      // Layer 1 — slot duration is derived from the CSV's own sampling interval unless
+      // explicitly overridden; there is deliberately no "slotsPerHour" knob, since a
+      // value contradicting the actual bucketing would silently corrupt the drift units.
+      const metrics = new MetricsExtractor().extract(
+        csvText,
+        lowLoadThresholdPct,
+        options.slotDurationSeconds,
+      );
 
       // Layer 2
       const deriverOptions: ParameterDeriverOptions = {
-        slotsPerHour: options.slotsPerHour ?? 1,
         fanOutFactors: options.fanOutFactors ?? {},
         driftDetectionThresholdMs: options.driftDetectionThresholdMs ?? 2.0,
-        lowLoadThresholdPct: options.lowLoadThresholdPct ?? 0.5,
+        lowLoadThresholdPct,
       };
       const derived = new ParameterDeriver(deriverOptions).derive(metrics);
 
@@ -68,6 +78,7 @@ export default class ConverterHandler extends IRequestHandler {
         spikeRatioThreshold: options.spikeRatioThreshold ?? 3.0,
         loadCorrelationThreshold: options.loadCorrelationThreshold ?? 0.6,
         jitterCvThreshold: options.jitterCvThreshold ?? 0.2,
+        mapeSamplesPerCandidate: options.mapeSamplesPerCandidate ?? 3,
       };
       const result = new ConverterService(
         new SimulatorRunnerAdapter(),
@@ -154,8 +165,11 @@ export default class ConverterHandler extends IRequestHandler {
 // ─── Request option types (for documentation / frontend contract) ─────────────
 
 interface ConverterRunOptions {
+  // MetricsExtractor options
+  /** Force a bucket size instead of deriving one from the CSV's sampling interval. */
+  slotDurationSeconds?: number;
+
   // ParameterDeriver options
-  slotsPerHour?: number;
   fanOutFactors?: Record<string, number>;
   driftDetectionThresholdMs?: number;
   lowLoadThresholdPct?: number;
@@ -167,4 +181,5 @@ interface ConverterRunOptions {
   spikeRatioThreshold?: number;
   loadCorrelationThreshold?: number;
   jitterCvThreshold?: number;
+  mapeSamplesPerCandidate?: number;
 }
