@@ -1,5 +1,3 @@
-// src/simulator/load/MLModelClient.ts
-
 export type MLModelType = "xgboost" | "random_forest" | "lstm";
 
 export interface MLPredictFeatures {
@@ -37,7 +35,12 @@ export default class MLModelClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.error(
+          `[MLModelClient] predict failed: ${model} returned HTTP ${res.status}`
+        );
+        return null;
+      }
       const data = (await res.json()) as {
         predicted_request_count_per_second: number;
       };

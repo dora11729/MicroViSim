@@ -19,7 +19,10 @@ import LoadSimulationPropagator from "./LoadSimulationPropagator";
 import FaultInjector from "./FaultInjector";
 import OverloadErrorRateAndLatencyEstimator from "./OverloadErrorRateAndLatencyEstimator";
 import SimulatorUtils from "../SimulatorUtils";
-import MLScalingHandler from "./MLScalingHandler";
+import MLScalingHandler, { TMLFallbackReason } from "./MLScalingHandler";
+import PredictionAccuracyTracker from "./PredictionAccuracyTracker";
+
+const SECONDS_PER_HOUR = 3600;
 
 export default class LoadSimulationHandler {
   private static instance?: LoadSimulationHandler;
@@ -47,6 +50,7 @@ export default class LoadSimulationHandler {
     simulateDate: number
   ): Promise<{
     realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]>;
+    realtimeReplicaCountTimeline: Map<string, TReplicaCount[]>;
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>
   }> {
 
@@ -57,19 +61,6 @@ export default class LoadSimulationHandler {
     );
 
     // console.log("metricsPerTimeSlotMap origin", metricsPerTimeSlotMap);
-
-    // collect replica timeline
-    const replicaTimeline: {
-      timeSlot: string;
-      replicas: Record<string, number>;
-    }[] = [];
-    for (const [timeSlotKey, metricsInThisTimeSlot] of metricsPerTimeSlotMap.entries()) {
-      replicaTimeline.push({
-        timeSlot: timeSlotKey,
-        replicas: Object.fromEntries(metricsInThisTimeSlot.getServiceReplicaCountMap())
-      });
-    }
-
 
     /*
       Inject faults before traffic propagation to ensure that both propagations 
@@ -135,9 +126,14 @@ export default class LoadSimulationHandler {
       simulateDate
     );
 
+    // Post-auto-scaling replica count per time slot, restricted to the slots that produced
+    // realtime data so both maps stay aligned for downstream consumers.
     const realtimeReplicaCountTimeline = new Map<string, TReplicaCount[]>();
 
-    for (const [timeSlotKey, metrics] of metricsPerTimeSlotMap.entries()) {
+    for (const timeSlotKey of realtimeCombinedDataPerTimeSlotMap.keys()) {
+      const metrics = metricsPerTimeSlotMap.get(timeSlotKey);
+      if (!metrics) continue;
+
       const replicaList: TReplicaCount[] = baseReplicaCountList.map(svc => ({
         uniqueServiceName: svc.uniqueServiceName,
         service: svc.service,
@@ -151,6 +147,7 @@ export default class LoadSimulationHandler {
 
     return {
       realtimeCombinedDataPerTimeSlotMap: realtimeCombinedDataPerTimeSlotMap,
+      realtimeReplicaCountTimeline: realtimeReplicaCountTimeline,
       metricsPerTimeSlotMap: metricsPerTimeSlotMap,
     };
   }
@@ -377,6 +374,9 @@ export default class LoadSimulationHandler {
 
   /*
     判斷service是否開啟autoScaling，有的話判斷是否進行scale
+
+      no model => reactive HPA, the naive "next RPS = last RPS"
+      model    => predicts slot t from the history ending at t-1
   */
   private async applyAutoScalingForTimeSlot(
     propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
@@ -390,6 +390,14 @@ export default class LoadSimulationHandler {
 
     // ns: namespace
     const dataset = [];
+
+    // evaluate RPS: actual V.S. predicted V.S. naive (last RPS)
+    const accuracyTracker = new PredictionAccuracyTracker();
+
+    // Map<uniqueServiceName, Map<TMLFallbackReason, counts>>
+    // ML prediction failed record
+    const fallbackCounts = new Map<string, Map<TMLFallbackReason, number>>();
+
     for (const ns of serviceMetrics) {
       for (const svc of ns.services) {
         for (const ver of svc.versions) {
@@ -401,32 +409,40 @@ export default class LoadSimulationHandler {
           const uniqueServiceName = ver.uniqueServiceName;
           const model = ver.autoScaling.model ?? null;
           const { targetUtilization, tolerance, maxScaleStep, maxReplicas } = ver.autoScaling;
-          const lastReplicaCountMap = new Map<string, number>();
+          let lastReplicaCount: number | null = null;
 
-          for (const timeSlotKey of sortedTimeSlotKeys) {
+          for (let slotIndex = 0; slotIndex < sortedTimeSlotKeys.length; slotIndex++) {
+            const timeSlotKey = sortedTimeSlotKeys[slotIndex];
             const metricsInThisTimeSlot = metricsPerTimeSlotMap.get(timeSlotKey);
-            const serviceRequestCounts = serviceReceivedRequestCount.get(timeSlotKey);
-            if (!metricsInThisTimeSlot || !serviceRequestCounts) continue;
-
-            // Get request count for the service in this hour
-            const requestCountInThisHour = serviceRequestCounts.get(uniqueServiceName) ?? 0;
-            var requestCountPerSecond = requestCountInThisHour / 3600;
+            if (!metricsInThisTimeSlot) continue;
 
             const baseReplicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
-            var lastReplicaCount = lastReplicaCountMap.get(uniqueServiceName) ?? baseReplicaCount;
+            const currentReplicaCount = lastReplicaCount ?? baseReplicaCount;
             const replicaMaxRPS = metricsInThisTimeSlot.getServiceCapacityPerReplica(uniqueServiceName);
 
-            /*
-            console.log("----------")
-            console.log("timeSlotKey=", timeSlotKey)
-            console.log("uniqueServiceName=", uniqueServiceName)
-            console.log("requestCountPerSecond=", requestCountPerSecond)
-            console.log("lastReplicaCount=", lastReplicaCount)
-            console.log("replicaMaxRPS=", replicaMaxRPS)
-            console.log("maxScaleStep=", maxScaleStep)
-            */
+            // Ground truth for this slot: only the dataset may use it.
+            const actualRequestCountPerSecond =
+              (serviceReceivedRequestCount.get(timeSlotKey)?.get(uniqueServiceName) ?? 0) / SECONDS_PER_HOUR;
 
-            // use ML model to predict RPS as requestCountPerSecond
+            const lastTimeSlotKey = sortedTimeSlotKeys[slotIndex - 1];
+            if (lastTimeSlotKey === undefined) {
+              lastReplicaCount = baseReplicaCount;
+              dataset.push({
+                timeSlotKey,
+                service: uniqueServiceName,
+                requestCountPerSecond: actualRequestCountPerSecond,
+                replicaCount: baseReplicaCount,
+                replicaMaxRPS,
+              });
+              continue;
+            }
+
+            const lastRequestCountPerSecond =
+              (serviceReceivedRequestCount.get(lastTimeSlotKey)?.get(uniqueServiceName) ?? 0) / SECONDS_PER_HOUR;
+
+            // default to the naive predictor (last RPS) if no model is specified or if the model fails
+            let predictedRequestCountPerSecond = lastRequestCountPerSecond;
+
             if (model !== null) {
               const history = model === "lstm"
                 ? this.mlScalingHandler.buildHistoryWindow(
@@ -438,22 +454,32 @@ export default class LoadSimulationHandler {
                 )
                 : undefined;
 
-              const predictedRPS = await this.mlScalingHandler.predictNextRPS(
+              const outcome = await this.mlScalingHandler.predictNextRPS(
                 model,
-                { replicaCount: lastReplicaCount, requestCountPerSecond, replicaMaxRPS },
+                {
+                  replicaCount: currentReplicaCount,
+                  requestCountPerSecond: lastRequestCountPerSecond,
+                  replicaMaxRPS,
+                },
                 history ?? undefined
               );
 
-              if (predictedRPS !== null) {
-                console.log(`[ML:${model}] `, uniqueServiceName, ` ${timeSlotKey}: original RPS: ${requestCountPerSecond}, predicted: ${predictedRPS}`);
-
-                requestCountPerSecond = predictedRPS;
+              if (outcome.status === "ok") {
+                predictedRequestCountPerSecond = outcome.predictedRPS;
+              } else {
+                this.recordFallback(fallbackCounts, uniqueServiceName, outcome.reason);
               }
             }
 
+            accuracyTracker.record(uniqueServiceName, model, {
+              actual: actualRequestCountPerSecond,
+              predicted: predictedRequestCountPerSecond,
+              naive: lastRequestCountPerSecond,
+            });
+
             const desireReplicas = this.computeDesiredReplicas(
-              requestCountPerSecond,
-              lastReplicaCount,
+              predictedRequestCountPerSecond,
+              currentReplicaCount,
               replicaMaxRPS,
               targetUtilization,
               tolerance
@@ -464,8 +490,8 @@ export default class LoadSimulationHandler {
             // 把值限制在[min, max]區間內
             // make sure it doesn't exceed maxReplicas and at least 1
             const finalDesired = Math.min(
-              Math.max(desireReplicas, lastReplicaCount - maxScaleStep, 1),  // scale down 上界(lowerBound)
-              lastReplicaCount + maxScaleStep,                              // scale up 上界(upperBound)
+              Math.max(desireReplicas, currentReplicaCount - maxScaleStep, 1),  // scale down 上界(lowerBound)
+              currentReplicaCount + maxScaleStep,                               // scale up 上界(upperBound)
               maxReplicas
             );
 
@@ -478,23 +504,52 @@ export default class LoadSimulationHandler {
 
 
             // ------------------------------------------------
-            const currentReplicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
+            const scaledReplicaCount = metricsInThisTimeSlot.getServiceReplicaCount(uniqueServiceName);
             dataset.push({
               timeSlotKey,
               service: uniqueServiceName,
-              requestCountPerSecond,
-              replicaCount: currentReplicaCount,
+              requestCountPerSecond: actualRequestCountPerSecond,
+              replicaCount: scaledReplicaCount,
               replicaMaxRPS
             });
-            lastReplicaCountMap.set(uniqueServiceName, currentReplicaCount);
+            lastReplicaCount = scaledReplicaCount;
             // ------------------------------------------------
 
           }
         }
       }
     }
-    console.dir(dataset, { depth: null, maxArrayLength: null });
 
+    accuracyTracker.report();
+    this.reportMLFallbacks(fallbackCounts);
+    console.dir(dataset, { depth: null, maxArrayLength: null });
+  }
+
+  private recordFallback(
+    fallbackCounts: Map<string, Map<TMLFallbackReason, number>>,
+    uniqueServiceName: string,
+    reason: TMLFallbackReason
+  ) {
+    if (!fallbackCounts.has(uniqueServiceName)) {
+      fallbackCounts.set(uniqueServiceName, new Map());
+    }
+    const reasonCounts = fallbackCounts.get(uniqueServiceName)!;
+    reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+  }
+
+  // A fallback slot is indistinguishable from reactive scaling, so a run with many of
+  // them is not really measuring the model. Surface the counts rather than hide them.
+  private reportMLFallbacks(
+    fallbackCounts: Map<string, Map<TMLFallbackReason, number>>
+  ) {
+    for (const [uniqueServiceName, reasonCounts] of fallbackCounts.entries()) {
+      const breakdown = Array.from(reasonCounts.entries())
+        .map(([reason, count]) => `${reason}=${count}`)
+        .join(", ");
+      console.warn(
+        `[Auto-scaling] ${uniqueServiceName}: fell back to last RPS in some time slots (${breakdown})`
+      );
+    }
   }
 
 

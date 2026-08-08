@@ -3,6 +3,17 @@ import MLModelClient, { MLModelType, MLPredictFeatures, MLPredictSequence } from
 const SECONDS_PER_HOUR = 3600;
 const LSTM_WINDOW_SIZE = 10;
 
+/*
+  Why a prediction was not usable, so callers can report how often they fell back.
+  insufficientHistory: LSTM needs LSTM_WINDOW_SIZE preceding slots, so the first 10 slots of a simulation can never use the model. 
+  serviceUnavailable: ML sidecar errored.
+*/
+export type TMLFallbackReason = "insufficientHistory" | "serviceUnavailable";
+
+export type TMLPredictionOutcome =
+  | { status: "ok"; predictedRPS: number }
+  | { status: "fallback"; reason: TMLFallbackReason };
+
 export default class MLScalingHandler {
   private static instance?: MLScalingHandler;
   static getInstance = () => this.instance || (this.instance = new this());
@@ -30,7 +41,7 @@ export default class MLScalingHandler {
       requestCountPerSecond: number;
       replicaMaxRPS: number;
     }>
-  ): Promise<number | null> {
+  ): Promise<TMLPredictionOutcome> {
 
     if (model === "lstm") {
       return this.predictWithLSTM(history);
@@ -41,22 +52,25 @@ export default class MLScalingHandler {
   private async predictWithTabular(
     model: MLModelType,
     features: { replicaCount: number; requestCountPerSecond: number; replicaMaxRPS: number }
-  ): Promise<number | null> {
+  ): Promise<TMLPredictionOutcome> {
     const payload: MLPredictFeatures = {
       replicaCount: features.replicaCount,
       requestCountPerSecond: features.requestCountPerSecond,
       replicaMaxRPS: features.replicaMaxRPS,
       service: 0,  // 訓練時是 1~4，預測模擬中的 service 時傳 0
     };
-    return this.mlClient.predictNextRequestCount(model, payload);
+    const predictedRPS = await this.mlClient.predictNextRequestCount(model, payload);
+    return predictedRPS === null
+      ? { status: "fallback", reason: "serviceUnavailable" }
+      : { status: "ok", predictedRPS };
   }
 
   private async predictWithLSTM(
     history?: Array<{ replicaCount: number; requestCountPerSecond: number; replicaMaxRPS: number }>
-  ): Promise<number | null> {
+  ): Promise<TMLPredictionOutcome> {
     if (!history || history.length < LSTM_WINDOW_SIZE) {
       // 歷史資料不足，無法使用 LSTM
-      return null;
+      return { status: "fallback", reason: "insufficientHistory" };
     }
 
     // 取最近 WINDOW_SIZE 筆，按時間升序
@@ -69,7 +83,10 @@ export default class MLScalingHandler {
       service: 0,
     }));
 
-    return this.mlClient.predictNextRequestCount("lstm", sequence);
+    const predictedRPS = await this.mlClient.predictNextRequestCount("lstm", sequence);
+    return predictedRPS === null
+      ? { status: "fallback", reason: "serviceUnavailable" }
+      : { status: "ok", predictedRPS };
   }
 
   /**

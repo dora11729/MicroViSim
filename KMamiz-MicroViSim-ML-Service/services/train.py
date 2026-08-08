@@ -14,7 +14,7 @@ TARGET_COL   = "target_next"
 
 
 # ─────────────────────────────────────────────
-# 1. 上傳 CSV：只存檔，不訓練
+# 1. 上傳資料集：正規化成 CSV 後存檔，不訓練
 # ─────────────────────────────────────────────
 
 @router.post("/uploadDataset")
@@ -27,12 +27,14 @@ async def upload_dataset(file: UploadFile = File(...)):
 
     # 先驗證格式是否正確
     try:
-        _prepare_dataframe(content, file.filename)
+        raw_df = _read_dataframe(content, file.filename)
+        _prepare_dataframe(raw_df)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=f"Invalid dataset format: {e}")
 
-    # 存檔（覆蓋舊的）
-    save_path.write_bytes(content)
+    # 一律存成 CSV（覆蓋舊的），否則 /train 讀回來時無從得知原始格式。
+    # 存的是未經前處理的原始欄位，讓 /train 能重跑完整的 _prepare_dataframe。
+    save_path.write_text(raw_df.to_csv(index=False), encoding="utf-8")
     print(f"[Train] Dataset saved to {save_path}")
 
     return {"message": "Dataset uploaded successfully. It will be used for training when simulation starts."}
@@ -56,7 +58,7 @@ async def train(req: TrainRequest):
 
     content = dataset_path.read_bytes()
     try:
-        df = _prepare_dataframe(content, "dataset.csv")
+        df = _prepare_dataframe(_read_dataframe(content, "dataset.csv"))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -88,11 +90,14 @@ async def train(req: TrainRequest):
 # 前處理（跟訓練時一致）
 # ─────────────────────────────────────────────
 
-def _prepare_dataframe(content: bytes, filename: str) -> pd.DataFrame:
+def _read_dataframe(content: bytes, filename: str) -> pd.DataFrame:
     if filename.endswith(".json"):
-        df = pd.read_json(io.BytesIO(content))
-    else:
-        df = pd.read_csv(io.BytesIO(content))
+        return pd.read_json(io.BytesIO(content))
+    return pd.read_csv(io.BytesIO(content))
+
+
+def _prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()  # 呼叫端還要用原始 DataFrame 存檔
 
     required = {"requestCountPerSecond", "replicaCount", "replicaMaxRPS", "service", "timeSlotKey"}
     missing = required - set(df.columns)
@@ -149,8 +154,6 @@ def _train_lstm(df: pd.DataFrame, feature_cols: list) -> str:
         from tensorflow.keras.callbacks import EarlyStopping
 
         window_size = 10
-        split_time  = df["timestamp"].quantile(0.8)
-        train_df    = df[df["timestamp"] <= split_time]
 
         def build_sequences(dataframe):
             X_all, y_all = [], []
@@ -160,18 +163,21 @@ def _train_lstm(df: pd.DataFrame, feature_cols: list) -> str:
                 y_vals = svc_df[TARGET_COL].values
                 if len(X_vals) <= window_size:
                     continue
-                for i in range(len(X_vals) - window_size):
+                for i in range(len(X_vals) - window_size + 1):
                     X_all.append(X_vals[i:i+window_size])
-                    y_all.append(y_vals[i+window_size])
+                    y_all.append(y_vals[i+window_size-1])
             return (np.array(X_all), np.array(y_all)) if X_all else (None, None)
 
-        X_train, y_train = build_sequences(train_df)
+        # Trains on the whole dataset, like xgboost and random_forest do. Held-out
+        # evaluation is a separate simulation run, not a slice of this timeline.
+        X_train, y_train = build_sequences(df)
         if X_train is None:
             return "failed: not enough data"
 
         scaler = StandardScaler()
         n, t, f = X_train.shape
         X_scaled = scaler.fit_transform(X_train.reshape(-1, f)).reshape(n, t, f)
+        # Only used to stop training before it overfits, not as a test set.
         val_split = int(len(X_scaled) * 0.8)
 
         model = Sequential([

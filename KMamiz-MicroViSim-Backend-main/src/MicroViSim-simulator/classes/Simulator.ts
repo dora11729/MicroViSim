@@ -101,21 +101,7 @@ export default class Simulator {
         )
 
       realtimeCombinedDataPerTimeSlotMap = metricsMap.realtimeCombinedDataPerTimeSlotMap;
-
-      for (const [timeSlotKey, _] of realtimeCombinedDataPerTimeSlotMap.entries()) {
-        const metricsPerTimeSlot = metricsMap.metricsPerTimeSlotMap.get(timeSlotKey);
-        if (!metricsPerTimeSlot) continue;
-
-        const replicaList: TReplicaCount[] = basicReplicaCountList.map(base => ({
-          uniqueServiceName: base.uniqueServiceName,
-          service: base.service,
-          namespace: base.namespace,
-          version: base.version,
-          replicas: metricsPerTimeSlot.getServiceReplicaCount(base.uniqueServiceName)
-        }));
-
-        realtimeReplicaCountTimeline.set(timeSlotKey, replicaList);
-      }
+      realtimeReplicaCountTimeline = metricsMap.realtimeReplicaCountTimeline;
     }
 
     try {
