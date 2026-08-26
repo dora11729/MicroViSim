@@ -21,6 +21,7 @@ import OverloadErrorRateAndLatencyEstimator from "./OverloadErrorRateAndLatencyE
 import SimulatorUtils from "../SimulatorUtils";
 import MLScalingHandler, { TMLFallbackReason } from "./MLScalingHandler";
 import PredictionAccuracyTracker from "./PredictionAccuracyTracker";
+import SimulationRandom from "../SimulationRandom";
 
 const SECONDS_PER_HOUR = 3600;
 
@@ -33,6 +34,7 @@ export default class LoadSimulationHandler {
   private faultInjector: FaultInjector;
   private overloadErrorRateAndLatencyEstimator: OverloadErrorRateAndLatencyEstimator;
   private mlScalingHandler: MLScalingHandler;
+  private random: SimulationRandom;
 
   private constructor() {
     this.dataGenerator = new LoadSimulationDataGenerator();
@@ -40,6 +42,7 @@ export default class LoadSimulationHandler {
     this.faultInjector = new FaultInjector();
     this.overloadErrorRateAndLatencyEstimator = new OverloadErrorRateAndLatencyEstimator();
     this.mlScalingHandler = MLScalingHandler.getInstance();
+    this.random = SimulationRandom.getInstance();
   }
 
   async generateCombinedRealtimeDataMap(
@@ -53,6 +56,10 @@ export default class LoadSimulationHandler {
     realtimeReplicaCountTimeline: Map<string, TReplicaCount[]>;
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>
   }> {
+
+    // Reseed before anything draws, so the whole run replays from this one number.
+    const seed = this.random.reset(loadSimulationSettings.config.randomSeed);
+    console.log(`[Simulation] random seed: ${seed}`);
 
     // Generate base metrics data for each service and endpoint from simulation config
     const metricsPerTimeSlotMap = this.generateBaseMetricsPerTimeSlotMap(
@@ -304,7 +311,7 @@ export default class LoadSimulationHandler {
       (TODO:後續可找幾篇論文研究真實流量波動範圍，然後調整此設計！！)
     */
     const weights = Array.from({ length: data.timeSlotCountPerDay }, () => {
-      return 1 + (Math.random() * 0.4 - 0.2); // 範圍：0.8 ~ 1.2
+      return 1 + (this.random.next() * 0.4 - 0.2); // 範圍：0.8 ~ 1.2
     });
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
     const normalizedWeights = weights.map(w => w / totalWeight);

@@ -1,6 +1,8 @@
 import { TLoadSimulationSettings } from "../../entities/TSimConfigLoadSimulation";
 import { TCMetricsPerTimeSlot } from "../../entities/TLoadSimulation";
+import SimulationRandom from "../SimulationRandom";
 export default class FaultInjector {
+  private random = SimulationRandom.getInstance();
 
   injectFault(
     loadSimulationSettings: TLoadSimulationSettings,
@@ -167,7 +169,7 @@ export default class FaultInjector {
 
       // 故障注入
       for (const [timeSlotKey, prob] of timeSlotProbMap.entries()) {
-        const isFaultOccur = Math.random() <= prob;
+        const isFaultOccur = this.random.next() <= prob;
         if (!isFaultOccur) continue;
 
         // fault type checking

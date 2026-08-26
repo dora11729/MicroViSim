@@ -10,7 +10,9 @@ import { TCMetricsPerTimeSlot, } from "../../entities/TLoadSimulation";
 import { FallbackHandler } from "./FallbackHandler";
 import { TSimulationEndpointMetric } from "../../entities/TSimConfigLoadSimulation";
 import LatencySimulator from "./LatencySimulator";
+import SimulationRandom from "../SimulationRandom";
 export default class LoadSimulationPropagator {
+  private random = SimulationRandom.getInstance();
   /*
     Explanation of NO_DEPENDENT_CALL:
       If the total call probability of a dependency group is less than 100%, 
@@ -171,7 +173,7 @@ export default class LoadSimulationPropagator {
       // Simulate this endpointNode’s own error state
       const ownSuccessStatus = new Map<string, boolean>();
       for (const reqId of filteredRequestIds) {
-        const isError = Math.random() < errorRate;
+        const isError = this.random.next() < errorRate;
         ownSuccessStatus.set(reqId, !isError);
         currentStatus.set(reqId, !isError);
         // const jitteredLatency = this.getJitteredLatency(delay.latencyMs, delay.jitterMs);
@@ -206,7 +208,7 @@ export default class LoadSimulationPropagator {
         // For each dependent group, randomly select one endpoint based on call probability
         dependentsGroups.forEach((group, groupIdx) => {
           for (const reqId of filteredRequestIds) {
-            const rand = Math.random() * 100;
+            const rand = this.random.next() * 100;
             let cumulativeProb = 0;
             let selectedEndpoint = LoadSimulationPropagator.NO_DEPENDENT_CALL;
 

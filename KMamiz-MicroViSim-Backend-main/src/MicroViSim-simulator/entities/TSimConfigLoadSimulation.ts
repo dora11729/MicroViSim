@@ -38,6 +38,10 @@ export const loadSimulationConfigSchema = z.object({
       message: "Invalid overloadLatencyAmplifier. It must be at least 0.",
     })
     .default(0),
+  // Omit it to get a different random run each time.
+  randomSeed: z.number()
+    .int({ message: "randomSeed must be an integer." })
+    .optional(),
   // TODO: May expand with additional config options such as chaosMonkeyEnabled, errorRateAmplificationFactor, etc^_^.
 }).strict().default({
   simulationDurationInDays: 1,

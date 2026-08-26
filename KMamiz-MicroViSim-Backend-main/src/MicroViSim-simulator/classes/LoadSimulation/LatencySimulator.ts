@@ -1,6 +1,9 @@
 import { TSimulationEndpointDelay } from "../../entities/TSimConfigLoadSimulation";
+import SimulationRandom from "../SimulationRandom";
 
 export default class LatencySimulator {
+    private random = SimulationRandom.getInstance();
+
     // AR(1) 狀態：記錄每個 endpoint 的上一個 epsilon
     private epsilonState = new Map<string, number>();
 
@@ -82,8 +85,8 @@ export default class LatencySimulator {
         if (mean <= 0) return 0;
         const { mu, sigma } = this.toLogNormalParams(mean, Math.max(std, 1));
         // 取樣一個標準常態 epsilon，再套 AR(1)
-        const rawEpsilon = (Math.sqrt(-2 * Math.log(Math.random())) *
-            Math.cos(2 * Math.PI * Math.random()));
+        const rawEpsilon = (Math.sqrt(-2 * Math.log(this.random.next())) *
+            Math.cos(2 * Math.PI * this.random.next()));
 
         if (!isSmoothed) {
             return Math.max(0, Math.exp(mu + sigma * rawEpsilon));
@@ -104,7 +107,7 @@ export default class LatencySimulator {
             // keep spike
             this.spikeActiveState.set(serviceName, true);
             this.spikeRemainingSlots.set(serviceName, remaining - 1);
-        } else if (!this.spikeActiveState.get(serviceName) && Math.random() < spikeProbability) {
+        } else if (!this.spikeActiveState.get(serviceName) && this.random.next() < spikeProbability) {
             // trigger new spike
             this.spikeActiveState.set(serviceName, true);
             this.spikeRemainingSlots.set(serviceName, spikeDuration - 1);
