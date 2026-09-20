@@ -126,21 +126,15 @@ const baseDelaySchema = z.object({
   }).default(0),
 });
 
-const stableDelaySchema = baseDelaySchema.extend({
-  type: z.literal("stable", {
-    message: "type must be stable, spike, jitter, gradualDrift or loadDriven.",
-  }),
-});
-
 const jitterDelaySchema = baseDelaySchema.extend({
   type: z.literal("jitter", {
-    message: "type must be stable, spike, jitter, gradualDrift or loadDriven.",
+    message: "type must be jitter, spike, gradualDrift or loadDriven.",
   }),
 });
 
 const spikeDelaySchema = baseDelaySchema.extend({
   type: z.literal("spike", {
-    message: "type must be stable, spike, jitter, gradualDrift or loadDriven.",
+    message: "type must be jitter, spike, gradualDrift or loadDriven.",
   }),
   spikeProbability: z.number()
     .refine((val) => val >= 0 && val <= 1, {
@@ -158,7 +152,7 @@ const spikeDelaySchema = baseDelaySchema.extend({
 
 const gradualDriftDelaySchema = baseDelaySchema.extend({
   type: z.literal("gradualDrift", {
-    message: "type must be stable, spike, jitter, gradualDrift or loadDriven.",
+    message: "type must be jitter, spike, gradualDrift or loadDriven.",
   }),
   driftRate: z.number().min(0, {
     message: "driftRate must be zero or greater.",
@@ -172,21 +166,20 @@ const gradualDriftDelaySchema = baseDelaySchema.extend({
 
 const loadDrivenDelaySchema = baseDelaySchema.extend({
   type: z.literal("loadDriven", {
-    message: "type must be stable, spike, jitter, gradualDrift or loadDriven.",
+    message: "type must be jitter, spike, gradualDrift or loadDriven.",
   }),
 });
 
 const singleDelaySchema = z.discriminatedUnion("type", [
-  stableDelaySchema,
   jitterDelaySchema,
   spikeDelaySchema,
   gradualDriftDelaySchema,
   loadDrivenDelaySchema,
-]).default({ type: "stable" });
+]).default({ type: "jitter" });
 
 const endpointDelaySchema = z.array(singleDelaySchema)
   .min(1, { message: "delay must have at least one entry." })
-  .default([{ type: "stable" }]);
+  .default([{ type: "jitter" }]);
 
 
 

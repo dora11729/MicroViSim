@@ -38,11 +38,11 @@ function convert(csv: string) {
 }
 
 describe("minimum-data guards", () => {
-  it("degrades a 2-slot endpoint to stable with an explanation instead of throwing", () => {
+  it("degrades a 2-slot endpoint to a plain jitter delay with an explanation instead of throwing", () => {
     const config = convert(buildEvenCsv(2, 60));
 
-    expect(config.selectedTypes).toEqual(["stable"]);
-    expect(config.selectionReasons.stable).toMatch(/time slot/);
+    expect(config.selectedTypes).toEqual(["jitter"]);
+    expect(config.selectionReasons.jitter).toMatch(/time slot/);
     expect(config.slotModel.notes.some(n => /pattern detection/.test(n))).toBe(true);
   });
 
@@ -55,8 +55,8 @@ describe("minimum-data guards", () => {
 
     expect(config.errorRatePercent).toBeCloseTo(5, 3);
     expect(config.capacityPerReplica).toBeCloseTo(5, 2); // 20 rps / 4 replicas
-    const stable = config.delays.find(d => d.type === "stable");
-    expect(stable?.latencyMs).toBeGreaterThan(0);
+    const jitter = config.delays.find(d => d.type === "jitter");
+    expect(jitter?.latencyMs).toBeGreaterThan(0);
   });
 
   it("throws when the CSV has no parseable data rows", () => {

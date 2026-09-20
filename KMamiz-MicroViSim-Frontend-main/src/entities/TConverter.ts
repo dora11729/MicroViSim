@@ -62,7 +62,6 @@ export interface ConverterRunOptions {
   mapeWeights?: { latency: number; errorRate: number; rps: number };
   spikeRatioThreshold?: number;
   loadCorrelationThreshold?: number;
-  jitterCvThreshold?: number;
   mapeSamplesPerCandidate?: number;
 }
 

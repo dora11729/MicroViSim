@@ -80,7 +80,6 @@ const TYPE_COLOR: Record<
   string,
   "default" | "primary" | "secondary" | "success" | "warning" | "error" | "info"
 > = {
-  stable: "default",
   jitter: "info",
   spike: "warning",
   gradualDrift: "error",
@@ -97,7 +96,6 @@ const DEFAULT_OPTIONS: Required<
     | "searchSteps"
     | "spikeRatioThreshold"
     | "loadCorrelationThreshold"
-    | "jitterCvThreshold"
   >
 > & {
   fanOutFactors: string;
@@ -112,7 +110,6 @@ const DEFAULT_OPTIONS: Required<
   searchSteps: 7,
   spikeRatioThreshold: 3.0,
   loadCorrelationThreshold: 0.6,
-  jitterCvThreshold: 0.2,
   mapeWeights: { latency: "0.5", errorRate: "0.3", rps: "0.2" },
 };
 
@@ -174,7 +171,6 @@ function buildRunOptions(form: typeof DEFAULT_OPTIONS): ConverterRunOptions {
     searchSteps: form.searchSteps,
     spikeRatioThreshold: form.spikeRatioThreshold,
     loadCorrelationThreshold: form.loadCorrelationThreshold,
-    jitterCvThreshold: form.jitterCvThreshold,
     mapeWeights: weights,
   };
 }
@@ -649,19 +645,6 @@ export default function Converter() {
                         value={options.loadCorrelationThreshold}
                         onChange={(e) =>
                           updateOption("loadCorrelationThreshold", parseFloat(e.target.value) || 0.6)
-                        }
-                      />
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <TextField
-                        label="jitterCvThreshold"
-                        size="small"
-                        fullWidth
-                        type="number"
-                        inputProps={{ step: 0.05, min: 0, max: 1 }}
-                        value={options.jitterCvThreshold}
-                        onChange={(e) =>
-                          updateOption("jitterCvThreshold", parseFloat(e.target.value) || 0.2)
                         }
                       />
                     </Grid>

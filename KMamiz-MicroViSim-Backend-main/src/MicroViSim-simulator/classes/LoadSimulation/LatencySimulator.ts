@@ -55,11 +55,8 @@ export default class LatencySimulator {
 
         for (const delay of delays) {
             switch (delay.type) {
-                case "stable":
-                    total += this.computeStable(endpointName, delay.latencyMs, delay.jitterMs);
-                    break;
                 case "jitter":
-                    total += this.computeStable(endpointName, delay.latencyMs, delay.jitterMs * 3);
+                    total += this.sampleLogNormal(endpointName, delay.latencyMs, delay.jitterMs);
                     break;
                 case "gradualDrift":
                     total += this.computeGradualDrift(endpointName, delay);
@@ -76,7 +73,7 @@ export default class LatencySimulator {
         return maxLatencyMs > 0 ? Math.min(total, maxLatencyMs) : total;
     }
 
-    private computeStable(
+    private sampleLogNormal(
         endpointName: string,
         mean: number,
         std: number,
@@ -130,9 +127,9 @@ export default class LatencySimulator {
         const effectiveBase = latencyMs > 0 ? latencyMs : baseLatency;
 
         if (isActive) {
-            return this.computeStable(endpointName, effectiveBase * spikeMagnitude, jitterMs, false);
+            return this.sampleLogNormal(endpointName, effectiveBase * spikeMagnitude, jitterMs, false);
         }
-        return this.computeStable(endpointName, latencyMs, jitterMs);
+        return this.sampleLogNormal(endpointName, latencyMs, jitterMs);
     }
 
     /*
@@ -153,7 +150,7 @@ export default class LatencySimulator {
         ? Math.min(driftedLatency, maxLatencyMs)
         : driftedLatency;
   
-      return this.computeStable(endpointName, cappedLatency, jitterMs);
+      return this.sampleLogNormal(endpointName, cappedLatency, jitterMs);
     }
       */
 
@@ -202,7 +199,7 @@ export default class LatencySimulator {
 
         const driftedLatency = latencyMs + accumulated;
 
-        return this.computeStable(endpointName, driftedLatency, jitterMs);
+        return this.sampleLogNormal(endpointName, driftedLatency, jitterMs);
     }
 
     private computeLoadDriven(
@@ -221,6 +218,6 @@ export default class LatencySimulator {
         const loadFactor = 1 / (1 - rho);
 
         const driftedLatency = latencyMs * loadFactor;
-        return this.computeStable(endpointName, driftedLatency, jitterMs);
+        return this.sampleLogNormal(endpointName, driftedLatency, jitterMs);
     }
 }

@@ -77,7 +77,6 @@ export default class ConverterHandler extends IRequestHandler {
         mapeWeights: options.mapeWeights,
         spikeRatioThreshold: options.spikeRatioThreshold ?? 3.0,
         loadCorrelationThreshold: options.loadCorrelationThreshold ?? 0.6,
-        jitterCvThreshold: options.jitterCvThreshold ?? 0.2,
         mapeSamplesPerCandidate: options.mapeSamplesPerCandidate ?? 3,
       };
       const result = new ConverterService(
@@ -180,6 +179,5 @@ interface ConverterRunOptions {
   mapeWeights?: { latency: number; errorRate: number; rps: number };
   spikeRatioThreshold?: number;
   loadCorrelationThreshold?: number;
-  jitterCvThreshold?: number;
   mapeSamplesPerCandidate?: number;
 }

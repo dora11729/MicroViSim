@@ -175,7 +175,7 @@ export class TCMetricsPerTimeSlot {
   getEndpointDelay(uniqueEndpointName: string): TSimulationEndpointDelay[] {
     const defaultDelay: TSimulationEndpointDelay[] = [
       {
-        type: "stable",
+        type: "jitter",
         latencyMs: 0,
         jitterMs: 0,
       }

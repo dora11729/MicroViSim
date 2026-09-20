@@ -163,7 +163,7 @@ export default class SimConfigLoadSimulationPreprocessor {
     const defaultMetrics: TSimulationEndpointMetric[] = missingEndpointIds.map(id => ({
       endpointId: id,
       delay: [{
-        type: "stable",
+        type: "jitter",
         latencyMs: 0,
         jitterMs: 0,
       }],

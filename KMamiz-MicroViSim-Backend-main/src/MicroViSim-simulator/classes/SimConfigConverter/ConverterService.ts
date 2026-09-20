@@ -119,7 +119,6 @@ export interface ConverterServiceOptions {
     loadCorrelationThreshold?: number;
 
     /** Jitter CV threshold for jitter vs stable selection. Default: 0.2 */
-    jitterCvThreshold?: number;
 
     /**
      * How many times to re-run the simulator per grid-search candidate, taking the median
@@ -137,7 +136,6 @@ export class ConverterService {
     private readonly weights: { latency: number; errorRate: number; rps: number };
     private readonly spikeRatioThreshold: number;
     private readonly loadCorrelationThreshold: number;
-    private readonly jitterCvThreshold: number;
     private readonly mapeSamplesPerCandidate: number;
 
     constructor(
@@ -149,7 +147,6 @@ export class ConverterService {
         this.weights = options.mapeWeights ?? { latency: 0.5, errorRate: 0.3, rps: 0.2 };
         this.spikeRatioThreshold = options.spikeRatioThreshold ?? 3.0;
         this.loadCorrelationThreshold = options.loadCorrelationThreshold ?? 0.6;
-        this.jitterCvThreshold = options.jitterCvThreshold ?? 0.2;
         this.mapeSamplesPerCandidate = options.mapeSamplesPerCandidate ?? 3;
 
         this.validateOptions();
@@ -234,13 +231,13 @@ export class ConverterService {
         // reason rather than reporting a correlation fitted to three points.
         if (observed.slotStats.length < MetricsExtractor.MIN_SLOTS_FOR_STATS) {
             return {
-                selectedTypes: ["stable"],
+                selectedTypes: ["jitter"],
                 selectionReasons: {
-                    stable:
+                    jitter:
                         `only ${observed.slotStats.length} time slot(s) of ` +
                         `${observed.slotDurationSeconds}s (${Math.round(observed.observedSpanSeconds)}s observed); ` +
                         `at least ${MetricsExtractor.MIN_SLOTS_FOR_STATS} are needed to distinguish ` +
-                        `load-driven / drift / jitter / spike behaviour. Falling back to a stable ` +
+                        `load-driven / drift / spike behaviour. Falling back to a plain jitter ` +
                         `delay with latencyMs and jitterMs taken from the available sample(s).`,
                 },
             };
@@ -275,33 +272,27 @@ export class ConverterService {
                 `(confidence: ${derived.diagnostics.driftConfidence}, mode: ${derived.driftMode})`;
         }
 
-        // 4. baseline noise type (jitter vs stable): loadDriven and gradualDrift already
-        // sample their own LogNormal noise around their own latency baseline, so adding
-        // jitter/stable on top of either would double-count the resting latency. Only
-        // decide jitter vs stable when neither structural driver is already present.
+        // 4. baseline noise: loadDriven and gradualDrift already sample their own LogNormal
+        // noise around their own latency baseline, so adding jitter on top of either would
+        // double-count the resting latency.
         const hasStructuralBaseline = types.includes("loadDriven") || types.includes("gradualDrift");
         if (!hasStructuralBaseline) {
             const jitterCV = this.coefficientOfVariation(p50Values, derived.latencyMs);
-
-            if (jitterCV >= this.jitterCvThreshold) {
-                types.push("jitter");
-                reasons["jitter"] = `p50 CV=${jitterCV.toFixed(2)} ≥ ${this.jitterCvThreshold}`;
-            } else {
-                types.push("stable");
-                reasons["stable"] = `p50 CV=${jitterCV.toFixed(2)} < ${this.jitterCvThreshold}, low variance baseline`;
-                // Explain a degenerate correlation rather than silently reporting r=0.00.
-                if (loadCorr === 0 && this.isConstant(p50Values)) {
-                    reasons["stable"] +=
-                        `; observed p50 is constant across all ${p50Values.length} slots, ` +
-                        `so no load correlation is computable`;
-                }
+            types.push("jitter");
+            reasons["jitter"] = `baseline noise, p50 CV=${jitterCV.toFixed(2)}`;
+            // Explain a degenerate correlation rather than silently reporting r=0.00.
+            if (loadCorr === 0 && this.isConstant(p50Values)) {
+                reasons["jitter"] +=
+                    `; observed p50 is constant across all ${p50Values.length} slots, ` +
+                    `so no load correlation is computable`;
             }
         }
 
-        // Ensure at least one type
+        // Defensive: the branch above already guarantees a baseline whenever no structural
+        // driver was detected.
         if (types.length === 0) {
-            types.push("stable");
-            reasons["stable"] = "fallback: no specific pattern detected";
+            types.push("jitter");
+            reasons["jitter"] = "fallback: no specific pattern detected";
         }
 
         return { selectedTypes: types, selectionReasons: reasons };
@@ -312,7 +303,7 @@ export class ConverterService {
     // Iteration order matters: "spike" reads the running total accumulated by earlier
     // entries (see LatencySimulator.computeSpike's baseLatency fallback), so it must
     // always be built last.
-    private static readonly DELAY_ORDER: DelayType[] = ["loadDriven", "jitter", "stable", "gradualDrift", "spike"];
+    private static readonly DELAY_ORDER: DelayType[] = ["loadDriven", "jitter", "gradualDrift", "spike"];
 
     // Which structural type gets to carry the full resting latencyMs when several are
     // present together. Everything lower in this list becomes a zero-latencyMs overlay.
@@ -322,7 +313,7 @@ export class ConverterService {
     // unlike gradualDrift (latencyMs + accumulated) or spike (falls back to the running
     // total), it can never be expressed as a zero-latencyMs overlay. It is only ever safe
     // to include loadDriven in `types` when it is meant to be the baseline.
-    private static readonly BASELINE_PRIORITY: DelayType[] = ["loadDriven", "gradualDrift", "jitter", "stable"];
+    private static readonly BASELINE_PRIORITY: DelayType[] = ["loadDriven", "gradualDrift", "jitter"];
 
     /** Builds the delay array in PER-CALIBRATION-SLOT units. */
     private buildDelays(
@@ -340,18 +331,11 @@ export class ConverterService {
             const isBaseline = type === baselineType;
 
             switch (type) {
-                case "stable":
+                case "jitter":
                     // Redundant noise-only type when a structural baseline already exists
                     // (selectDelayTypes never selects it alongside one, this just mirrors
                     // that invariant here).
                     if (!isBaseline) break;
-                    delays.push({ type: "stable", latencyMs, jitterMs: derived.jitterMs });
-                    break;
-
-                case "jitter":
-                    if (!isBaseline) break;
-                    // jitter type uses 3× jitterMs internally (see LatencySimulator computeStable)
-                    // so we pass the raw jitterMs value here
                     delays.push({ type: "jitter", latencyMs, jitterMs: derived.jitterMs });
                     break;
 
@@ -854,7 +838,7 @@ export class ConverterService {
             : configs.reduce((s, c) => s + c.mape.weighted, 0) / configs.length;
 
         const dist: Record<DelayType, number> = {
-            stable: 0, jitter: 0, spike: 0, gradualDrift: 0, loadDriven: 0,
+            jitter: 0, spike: 0, gradualDrift: 0, loadDriven: 0,
         };
         for (const c of configs) {
             for (const t of c.selectedTypes) dist[t]++;

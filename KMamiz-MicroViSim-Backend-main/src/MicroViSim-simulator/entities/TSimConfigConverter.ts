@@ -174,7 +174,7 @@ export interface ParameterDeriverOptions {
 
 // ─── Layer 3：ConverterService ──────────────────────────────────────────────
 
-export type DelayType = "stable" | "jitter" | "spike" | "gradualDrift" | "loadDriven";
+export type DelayType = "jitter" | "spike" | "gradualDrift" | "loadDriven";
 
 export interface MapeScores {
     latency: number;     // MAPE on p50, median across sampleCount simulation runs
