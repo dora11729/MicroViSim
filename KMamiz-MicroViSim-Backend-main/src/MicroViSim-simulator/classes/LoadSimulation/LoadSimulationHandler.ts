@@ -4,6 +4,7 @@ import {
   TLoadSimulationSettings,
   TLoadSimulationConfig,
   TSimulationEndpointDelay,
+  TSimulationTrafficPattern,
 } from "../../entities/TSimConfigLoadSimulation";
 import {
   TBaseDataWithResponses,
@@ -222,6 +223,7 @@ export default class LoadSimulationHandler {
         expectedExternalDailyRequestCount: metric.expectedExternalDailyRequestCount,
         simulationDurationInDays,
         timeSlotCountPerDay,
+        trafficPattern: loadSimulationConfig.trafficPattern,
       });
       baseEndpointSimulationReqCountsMap.set(uniqueEndpointName,
         distributedDailyRequestCount
@@ -283,6 +285,7 @@ export default class LoadSimulationHandler {
       expectedExternalDailyRequestCount: number,
       simulationDurationInDays: number
       timeSlotCountPerDay: number,
+      trafficPattern: TSimulationTrafficPattern,
     }
   ): number[][] {
     const result: number[][] = [];
@@ -301,17 +304,23 @@ export default class LoadSimulationHandler {
     data: {
       expectedExternalDailyRequestCount: number,
       timeSlotCountPerDay: number,
+      trafficPattern: TSimulationTrafficPattern,
     }
 
   ): number[] {
 
     /*
       Generate random weights for distributing request counts across all time slots  
-      with ±20% fluctuation.
+      with flat: ±20%, diurnal and bimodal: ±10% fluctuation.
       (TODO:後續可找幾篇論文研究真實流量波動範圍，然後調整此設計！！)
     */
-    const weights = Array.from({ length: data.timeSlotCountPerDay }, () => {
-      return 1 + (this.random.next() * 0.4 - 0.2); // 範圍：0.8 ~ 1.2
+    const FLAT_JITTER = 0.2;
+    const SHAPED_JITTER = 0.1;
+    
+    const jitter = data.trafficPattern.shape === "flat" ? FLAT_JITTER : SHAPED_JITTER;
+    const shapeWeights = this.buildShapeWeights(data.timeSlotCountPerDay, data.trafficPattern);
+    const weights = shapeWeights.map(shapeWeight => {
+      return shapeWeight * (1 + (this.random.next() * 2 * jitter - jitter));
     });
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
     const normalizedWeights = weights.map(w => w / totalWeight);
@@ -339,6 +348,68 @@ export default class LoadSimulationHandler {
       }
     }
     return distributedDailyRequestCount;
+  }
+
+  /*
+    Relative busyness of each slot within a day, quietest slot always weighing 1 and the
+    busiest peakRatio.
+      diurnal => one broad peak at peakHour, bottoming out twelve hours later
+      bimodal => two peaks (peakHour and secondPeakHour), e.g. a commute pattern
+  */
+  private buildShapeWeights(
+    timeSlotCountPerDay: number,
+    trafficPattern: TSimulationTrafficPattern
+  ): number[] {
+    const { shape, peakHour, secondPeakHour, peakRatio } = trafficPattern;
+
+    if (shape === "flat") {
+      return new Array(timeSlotCountPerDay).fill(1);
+    }
+
+    if (shape === "bimodal") {
+      return this.buildBimodalWeights(timeSlotCountPerDay, peakHour, secondPeakHour, peakRatio);
+    }
+
+    return Array.from({ length: timeSlotCountPerDay }, (_, slot) => {
+      const phase = (2 * Math.PI * (slot - peakHour)) / timeSlotCountPerDay;
+      return 1 + (peakRatio - 1) * 0.5 * (1 + Math.cos(phase));
+    });
+  }
+
+  /*
+    Two bell curves, one per peak, combined by taking whichever is nearer so both peaks
+    reach peakRatio regardless of how far apart they sit. Their width scales with the
+    separation, which keeps the dip between them visible even for closely spaced peaks.
+  */
+  private buildBimodalWeights(
+    timeSlotCountPerDay: number,
+    peakHour: number,
+    secondPeakHour: number,
+    peakRatio: number
+  ): number[] {
+    const separation = this.hoursApart(peakHour, secondPeakHour, timeSlotCountPerDay);
+    const width = Math.max(separation / 3.5, 0.5);
+
+    const bump = (slot: number, peak: number) =>
+      Math.exp(-0.5 * (this.hoursApart(slot, peak, timeSlotCountPerDay) / width) ** 2);
+
+    const raw = Array.from({ length: timeSlotCountPerDay }, (_, slot) =>
+      Math.max(bump(slot, peakHour), bump(slot, secondPeakHour))
+    );
+
+    // Rescale so the quietest slot lands on 1 and the busiest on peakRatio.
+    const quietest = Math.min(...raw);
+    const busiest = Math.max(...raw);
+    const span = busiest - quietest;
+    return raw.map(value =>
+      span === 0 ? 1 : 1 + (peakRatio - 1) * ((value - quietest) / span)
+    );
+  }
+
+  // Distance between two slots taking the shorter way round the clock.
+  private hoursApart(a: number, b: number, timeSlotCountPerDay: number): number {
+    const direct = Math.abs(a - b) % timeSlotCountPerDay;
+    return Math.min(direct, timeSlotCountPerDay - direct);
   }
 
   /*

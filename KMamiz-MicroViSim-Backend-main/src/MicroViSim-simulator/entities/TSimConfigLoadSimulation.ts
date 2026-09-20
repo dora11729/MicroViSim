@@ -13,6 +13,30 @@ import { z } from "zod";
 /**** Simulation configuration YAML format validation ****/
 /** Load simulation **/
 
+// The recurring, every-day shape of the incoming traffic.
+const trafficPatternSchema = z.object({
+  shape: z.enum(["flat", "diurnal", "bimodal"], {
+    message: "shape must be one of 'flat', 'diurnal' or 'bimodal'.",
+  }).default("flat"),
+  peakHour: z.number()
+    .int({ message: "peakHour must be an integer." })
+    .min(0, { message: "peakHour must be at least 0." })
+    .max(23, { message: "peakHour cannot exceed 23." })
+    .default(14),
+  // The second busy period, e.g. a morning and an evening rush. Only read when shape
+  // is "bimodal"; peakHour is the first peak.
+  secondPeakHour: z.number()
+    .int({ message: "secondPeakHour must be an integer." })
+    .min(0, { message: "secondPeakHour must be at least 0." })
+    .max(23, { message: "secondPeakHour cannot exceed 23." })
+    .default(19),
+  // How many times busier the peak hour is than the quietest one. 1 means flat.
+  peakRatio: z.number()
+    .min(1, { message: "peakRatio must be at least 1." })
+    .max(20, { message: "peakRatio cannot exceed 20." })
+    .default(3),
+}).strict();
+
 // Load simulation basic config
 export const loadSimulationConfigSchema = z.object({
   simulationDurationInDays: z.number()
@@ -42,6 +66,7 @@ export const loadSimulationConfigSchema = z.object({
   randomSeed: z.number()
     .int({ message: "randomSeed must be an integer." })
     .optional(),
+  trafficPattern: trafficPatternSchema.default({}),
   // TODO: May expand with additional config options such as chaosMonkeyEnabled, errorRateAmplificationFactor, etc^_^.
 }).strict().default({
   simulationDurationInDays: 1,
@@ -210,6 +235,7 @@ export const loadSimulationSchema = z.object({
 
 /**** Schema to type ****/
 export type TFallbackStrategy = typeof fallbackStrategies[number];
+export type TSimulationTrafficPattern = z.infer<typeof trafficPatternSchema>;
 export type TLoadSimulationConfig = z.infer<typeof loadSimulationConfigSchema>;
 export type TSimulationServiceVersionScalingSchema = z.infer<typeof simulationServiceVersionScalingSchema>;
 export type TSimulationServiceVersionMetric = z.infer<typeof simulationServiceVersionMetricSchema>;
