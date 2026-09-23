@@ -33,11 +33,11 @@ describe("LoadSimulationHandler traffic pattern", () => {
   it("preserves the daily total whatever the shape", () => {
     const sum = (day: number[]) => day.reduce((a, b) => a + b, 0);
     expect(sum(distribute(mockPattern())[0])).toBe(DailyRequestCount);
-    expect(sum(distribute(mockPattern({ shape: "diurnal" }))[0])).toBe(DailyRequestCount);
+    expect(sum(distribute(mockPattern({ shape: "unimodal" }))[0])).toBe(DailyRequestCount);
   });
 
   it("makes the peak hour busier than its opposite", () => {
-    const [day] = distribute(mockPattern({ shape: "diurnal", peakHour: 14, peakRatio: 3 }));
+    const [day] = distribute(mockPattern({ shape: "unimodal", peakHour: 14, peakRatio: 3 }));
     // 3x shape either side of ±20% jitter still leaves the two well apart.
     expect(day[14] / day[2]).toBeGreaterThan(2);
   });
@@ -45,8 +45,8 @@ describe("LoadSimulationHandler traffic pattern", () => {
   it("moves the busy period with peakHour", () => {
     // Neighbouring slots differ by ~1% of shape, far less than the jitter, so compare
     // slots half a day apart where the shape difference is the full peakRatio.
-    const [early] = distribute(mockPattern({ shape: "diurnal", peakHour: 6 }));
-    const [late] = distribute(mockPattern({ shape: "diurnal", peakHour: 18 }));
+    const [early] = distribute(mockPattern({ shape: "unimodal", peakHour: 6 }));
+    const [late] = distribute(mockPattern({ shape: "unimodal", peakHour: 18 }));
     expect(early[6]).toBeGreaterThan(early[18]);
     expect(late[18]).toBeGreaterThan(late[6]);
   });
@@ -56,23 +56,23 @@ describe("LoadSimulationHandler traffic pattern", () => {
     // and the shared seed means they draw the same underlying numbers.
     const spread = (day: number[]) => Math.max(...day) / Math.min(...day);
     const [flat] = distribute(mockPattern());
-    const [shaped] = distribute(mockPattern({ shape: "diurnal", peakRatio: 1 }));
+    const [shaped] = distribute(mockPattern({ shape: "unimodal", peakRatio: 1 }));
     expect(spread(shaped)).toBeLessThan(spread(flat));
   });
 
   it("treats peakRatio 1 as flat", () => {
-    const [day] = distribute(mockPattern({ shape: "diurnal", peakRatio: 1 }));
+    const [day] = distribute(mockPattern({ shape: "unimodal", peakRatio: 1 }));
     expect(Math.max(...day) / Math.min(...day)).toBeLessThan(2);
   });
 
   it("repeats the shape on every simulated day", () => {
-    const days = distribute(mockPattern({ shape: "diurnal", peakHour: 14 }), 3);
+    const days = distribute(mockPattern({ shape: "unimodal", peakHour: 14 }), 3);
     expect(days).toHaveLength(3);
     days.forEach(day => expect(day[14] / day[2]).toBeGreaterThan(2));
   });
 
   it("replays the same distribution for the same seed", () => {
-    const pattern = mockPattern({ shape: "diurnal" });
+    const pattern = mockPattern({ shape: "unimodal" });
     expect(distribute(pattern)).toEqual(distribute(pattern));
   });
 

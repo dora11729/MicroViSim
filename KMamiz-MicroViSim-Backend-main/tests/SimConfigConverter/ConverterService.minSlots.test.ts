@@ -53,7 +53,7 @@ describe("minimum-data guards", () => {
     ]);
     const config = convert(csv);
 
-    expect(config.errorRatePercent).toBeCloseTo(5, 3);
+    expect(config.errorRatePercentage).toBeCloseTo(5, 3);
     expect(config.capacityPerReplica).toBeCloseTo(5, 2); // 20 rps / 4 replicas
     const jitter = config.delays.find(d => d.type === "jitter");
     expect(jitter?.latencyMs).toBeGreaterThan(0);
@@ -104,7 +104,7 @@ describe("a short CSV no longer degenerates the whole pipeline", () => {
   it("reports a real median error rate instead of a synthetic 0", () => {
     const m = new MetricsExtractor().extract(correlatedCsv()).get(KEY)!;
     expect(m.medianErrorRate).toBeCloseTo(0.02, 6);
-    expect(convert(correlatedCsv()).errorRatePercent).toBeCloseTo(2, 3);
+    expect(convert(correlatedCsv()).errorRatePercentage).toBeCloseTo(2, 3);
   });
 
   it("compares every observed slot when scoring", () => {

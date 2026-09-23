@@ -30,10 +30,10 @@ export default class FaultInjector {
           }
 
           // Fault increases the endpoint error rate
-          if (EndpointFaultObj.getIncreaseErrorRatePercent() > 0) {
+          if (EndpointFaultObj.getIncreaseErrorRatePercentage() > 0) {
             metricsInThisTimeSlot.addEndpointErrorRate(
               uniqueEndpointName,
-              EndpointFaultObj.getIncreaseErrorRatePercent() / 100
+              EndpointFaultObj.getIncreaseErrorRatePercentage() / 100
             );
           }
 
@@ -185,7 +185,7 @@ export default class FaultInjector {
           if (!epFaultRecordInThisTimeSlot) continue;
 
           const latency = isLatency ? fault.increaseLatencyMs : 0;
-          const errorRatePercent = isErrorRate ? fault.increaseErrorRatePercent : 0;
+          const errorRatePercentage = isErrorRate ? fault.increaseErrorRatePercentage : 0;
           const reqCount = isTrafficInjection ? fault.increaseRequestCount : 0;
           const reqMultiplier = isTrafficInjection ? fault.requestMultiplier : 0;
 
@@ -198,7 +198,7 @@ export default class FaultInjector {
               epFaultRecordInThisTimeSlot.set(uniqueEndpointName, faultObj);
             }
             if (latency > 0) faultObj.setIncreaseLatency(faultObj.getIncreaseLatency() + latency);
-            if (errorRatePercent > 0) faultObj.setIncreaseErrorRatePercent(faultObj.getIncreaseErrorRatePercent() + errorRatePercent);
+            if (errorRatePercentage > 0) faultObj.setIncreaseErrorRatePercentage(faultObj.getIncreaseErrorRatePercentage() + errorRatePercentage);
             if (reqCount) {
               faultObj.setIncreseRequestCount(reqCount);
             }
@@ -250,7 +250,7 @@ function printNestedFaultRecords(
         const epFault = faultObj as EndpointFault;
         result[timeSlotKey][uniqueName] = {
           increaseLatency: epFault.getIncreaseLatency(),
-          increaseErrorRatePercent: epFault.getIncreaseErrorRatePercent(),
+          increaseErrorRatePercentage: epFault.getIncreaseErrorRatePercentage(),
           increaseRequestCount: epFault.getIncreseRequestCount(),
           requestMultiplier: epFault.getRequestMultiplier(),
         };
@@ -280,17 +280,17 @@ function printNestedFaultRecords(
  */
 class EndpointFault {
   private _increaseLatency: number;
-  private _increaseErrorRatePercent: number;
+  private _increaseErrorRatePercentage: number;
   private _increseRequestCount: number;
   private _requestMultiplier: number;
   constructor(
     increaseLatency: number = 0,
-    increaseErrorRatePercent: number = 0,
+    increaseErrorRatePercentage: number = 0,
     increseRequestCount: number = 0,
     requestMultiplier: number = 0
   ) {
     this._increaseLatency = Math.max(0, increaseLatency);
-    this._increaseErrorRatePercent = Math.min(Math.max(0, increaseErrorRatePercent), 100);
+    this._increaseErrorRatePercentage = Math.min(Math.max(0, increaseErrorRatePercentage), 100);
     this._increseRequestCount = Math.max(0, increseRequestCount);
     this._requestMultiplier = Math.max(0, requestMultiplier);
   }
@@ -298,8 +298,8 @@ class EndpointFault {
   setIncreaseLatency(next: number) {
     this._increaseLatency = Math.max(0, next);
   }
-  setIncreaseErrorRatePercent(next: number) {
-    this._increaseErrorRatePercent = Math.min(Math.max(0, next), 100);
+  setIncreaseErrorRatePercentage(next: number) {
+    this._increaseErrorRatePercentage = Math.min(Math.max(0, next), 100);
   }
   setIncreseRequestCount(next: number) {
     this._increseRequestCount = Math.max(0, next);
@@ -311,8 +311,8 @@ class EndpointFault {
   getIncreaseLatency() {
     return this._increaseLatency;
   }
-  getIncreaseErrorRatePercent() {
-    return this._increaseErrorRatePercent;
+  getIncreaseErrorRatePercentage() {
+    return this._increaseErrorRatePercentage;
   }
   getIncreseRequestCount(): number {
     return this._increseRequestCount;

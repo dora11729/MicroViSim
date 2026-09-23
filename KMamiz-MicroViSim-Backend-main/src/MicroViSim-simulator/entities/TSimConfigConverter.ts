@@ -138,7 +138,7 @@ export interface DerivedEndpointParams {
     endpoint: string;
     latencyMs: number;
     jitterMs: number;
-    errorRate: number;    // 0–1, maps to errorRatePercent after ×100
+    errorRate: number;    // 0–1, maps to errorRatePercentage after ×100
     capacityPerReplica: number;   // req/second — duration-independent
 
     hasDrift: boolean;
@@ -223,7 +223,7 @@ export interface ConvertedEndpointConfig {
     /** Delay config in the TARGET simulator's units (per-hour), not calibration units. */
     delays: TSimulationEndpointDelay[];
     capacityPerReplica: number;
-    errorRatePercent: number;      // errorRate × 100 (YAML field convention)
+    errorRatePercentage: number;      // errorRate × 100 (YAML field convention)
 
     /** MAPE scores of the winning candidate */
     mape: MapeScores;

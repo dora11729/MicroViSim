@@ -170,7 +170,7 @@ export default class SimConfigLoadSimulationPreprocessor {
       maxLatencyMs: 0,
       timeoutMs: 0,
       expectedExternalDailyRequestCount: 0,
-      errorRatePercent: 0,
+      errorRatePercentage: 0,
       fallbackStrategy: "failIfAnyDependentFail" as TFallbackStrategy,
       uniqueEndpointName: serviceInfoDefinitionContext.endpointIdToUniqueNameMap.get(id)!,
     }));

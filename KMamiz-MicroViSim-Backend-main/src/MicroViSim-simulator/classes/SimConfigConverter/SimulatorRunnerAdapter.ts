@@ -66,7 +66,7 @@ export class SimulatorRunnerAdapter implements ISimulatorRunner {
         const endpointMetrics: TSimulationEndpointMetric[] = [
             {
                 endpointId: endpoint,
-                errorRatePercent: Math.round(errorRate * 10000) / 100,
+                errorRatePercentage: Math.round(errorRate * 10000) / 100,
                 delay: delays,
                 maxLatencyMs: 0,
                 timeoutMs: 0,

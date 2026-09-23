@@ -35,7 +35,7 @@ export interface ConvertedEndpoint {
     [key: string]: unknown;
   }>;
   capacityPerReplica: number;
-  errorRatePercent: number;
+  errorRatePercentage: number;
   mape: MapeScores;
   selectedTypes: string[];
   selectionReasons: Record<string, string>;

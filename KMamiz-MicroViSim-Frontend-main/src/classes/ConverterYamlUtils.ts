@@ -25,7 +25,7 @@ export function buildLoadSimulationSection(
   const endpointMetrics = Object.values(result.convertedEndpoints).map((ep) => ({
     endpointId: ep.endpoint,
     delay: ep.delays.map((d) => cleanDelay(d as Record<string, unknown>)),
-    errorRatePercent: ep.errorRatePercent,
+    errorRatePercentage: ep.errorRatePercentage,
   }));
 
   return {

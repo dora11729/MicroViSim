@@ -202,7 +202,7 @@ export class ConverterService {
             endpoint: derived.endpoint,
             delays: emittedDelays,
             capacityPerReplica: bestCapacity,
-            errorRatePercent: Math.round(derived.errorRate * 10000) / 100,  // 0.0023 → 0.23
+            errorRatePercentage: Math.round(derived.errorRate * 10000) / 100,  // 0.0023 → 0.23
             mape: bestMape,
             selectedTypes,
             selectionReasons,

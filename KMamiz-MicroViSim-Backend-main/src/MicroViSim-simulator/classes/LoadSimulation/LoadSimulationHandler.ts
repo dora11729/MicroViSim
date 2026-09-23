@@ -215,7 +215,7 @@ export default class LoadSimulationHandler {
 
       // EndpointErrorRate
       baseEndpointErrorRateMap.set(uniqueEndpointName,
-        (metric.errorRatePercent) / 100
+        (metric.errorRatePercentage) / 100
       );
 
       // DailyRequestCount (distributed)
@@ -311,7 +311,7 @@ export default class LoadSimulationHandler {
 
     /*
       Generate random weights for distributing request counts across all time slots  
-      with flat: ±20%, diurnal and bimodal: ±10% fluctuation.
+      with flat: ±20%, unimodal and bimodal: ±10% fluctuation.
       (TODO:後續可找幾篇論文研究真實流量波動範圍，然後調整此設計！！)
     */
     const FLAT_JITTER = 0.2;
@@ -353,7 +353,7 @@ export default class LoadSimulationHandler {
   /*
     Relative busyness of each slot within a day, quietest slot always weighing 1 and the
     busiest peakRatio.
-      diurnal => one broad peak at peakHour, bottoming out twelve hours later
+      unimodal => one broad peak at peakHour, bottoming out twelve hours later
       bimodal => two peaks (peakHour and secondPeakHour), e.g. a commute pattern
   */
   private buildShapeWeights(

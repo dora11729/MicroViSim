@@ -924,8 +924,8 @@ export default function Converter() {
                           <TableCell align="right">{ep.capacityPerReplica} req/s</TableCell>
                         </TableRow>
                         <TableRow>
-                          <TableCell>errorRatePercent</TableCell>
-                          <TableCell align="right">{ep.errorRatePercent}%</TableCell>
+                          <TableCell>errorRatePercentage</TableCell>
+                          <TableCell align="right">{ep.errorRatePercentage}%</TableCell>
                         </TableRow>
                         {ep.delays.map((d, i) => (
                           <TableRow key={i}>

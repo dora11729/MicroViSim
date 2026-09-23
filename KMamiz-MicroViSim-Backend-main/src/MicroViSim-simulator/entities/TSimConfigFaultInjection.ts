@@ -55,10 +55,10 @@ const increaseErrorRateFaultSchema = z.object({
     endpoints: z.array(faultTargetEndpointSchema).default([]),
   }).strict(),
   timePeriods: faultTimeSchema,
-  increaseErrorRatePercent: z
+  increaseErrorRatePercentage: z
     .number()
     .refine((val) => val >= 0 && val <= 100, {
-      message: "Invalid increaseErrorRatePercent. It must be between 0 and 100.",
+      message: "Invalid increaseErrorRatePercentage. It must be between 0 and 100.",
     })
 }).strict();
 

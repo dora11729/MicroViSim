@@ -15,22 +15,19 @@ import { z } from "zod";
 
 // The recurring, every-day shape of the incoming traffic.
 const trafficPatternSchema = z.object({
-  shape: z.enum(["flat", "diurnal", "bimodal"], {
-    message: "shape must be one of 'flat', 'diurnal' or 'bimodal'.",
+  shape: z.enum(["flat", "unimodal", "bimodal"], {
+    message: "shape must be one of 'flat', 'unimodal' or 'bimodal'.",
   }).default("flat"),
   peakHour: z.number()
     .int({ message: "peakHour must be an integer." })
     .min(0, { message: "peakHour must be at least 0." })
     .max(23, { message: "peakHour cannot exceed 23." })
     .default(14),
-  // The second busy period, e.g. a morning and an evening rush. Only read when shape
-  // is "bimodal"; peakHour is the first peak.
   secondPeakHour: z.number()
     .int({ message: "secondPeakHour must be an integer." })
     .min(0, { message: "secondPeakHour must be at least 0." })
     .max(23, { message: "secondPeakHour cannot exceed 23." })
     .default(19),
-  // How many times busier the peak hour is than the quietest one. 1 means flat.
   peakRatio: z.number()
     .min(1, { message: "peakRatio must be at least 1." })
     .max(20, { message: "peakRatio cannot exceed 20." })
@@ -201,7 +198,7 @@ export const simulationEndpointMetricSchema = z.object({
   timeoutMs: z.number().min(0, {
     message: "timeoutMs must be zero or greater.",
   }).default(0),
-  errorRatePercent: z
+  errorRatePercentage: z
     .number()
     .refine((val) => val >= 0 && val <= 100, {
       message: "Invalid errorRate. It must be between 0 and 100.",
