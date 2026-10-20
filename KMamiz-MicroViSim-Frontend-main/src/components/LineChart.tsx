@@ -1,15 +1,16 @@
 import { ApexOptions } from "apexcharts";
 import ReactApexChart from "react-apexcharts";
+import { forwardRef } from "react";
 import LineChartUtils from "../classes/LineChartUtils";
 
-export default function LineChart(props: {
+const LineChart = forwardRef<ReactApexChart, {
   title?: string;
   filename?: string;
   series: ApexAxisChartSeries;
   height?: number;
   overwriteOptions?: ApexOptions;
   chartId?: string;
-}) {
+}>((props, ref) => {
   const options: ApexOptions = {
     ...LineChartUtils.DefaultOptions(props.title || "", props.filename),
     chart: {
@@ -28,6 +29,6 @@ export default function LineChart(props: {
       series={props.series}
     />
   );
-};
+});
 
 export default LineChart;
