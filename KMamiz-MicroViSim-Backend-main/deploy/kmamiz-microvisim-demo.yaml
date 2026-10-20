@@ -59,6 +59,7 @@ spec:
     - protocol: TCP
       port: 8080 # this needs to match SERVICE_PORT
       targetPort: 3000
+      nodePort: 32259
   externalIPs:
     - 192.168.49.2
 ---
@@ -110,6 +111,7 @@ spec:
     - protocol: TCP
       port: 8081 # this needs to match SERVICE_PORT
       targetPort: 3000
+      nodePort: 30883
   externalIPs:
     - 192.168.49.2
 ---
