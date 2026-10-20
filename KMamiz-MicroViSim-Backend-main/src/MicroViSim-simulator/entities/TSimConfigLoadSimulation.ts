@@ -88,7 +88,7 @@ export const simulationServiceVersionScalingSchema = z.object({
     .max(1, { message: "targetUtilization cannot exceed 1." }).default(0.7),
   tolerance: z.number()
     .min(0.01, {message: "tolerance must be at least 0.01."})
-    .max(1, { message: "tolerance cannot exceed 1." }).default(0.25),
+    .max(1, { message: "tolerance cannot exceed 1." }).default(0.1),
   maxScaleStep: z.number().min(1, {message: "maxScaleStep must be at least 1."}).default(2),
   maxReplicas: z.number().min(1, {message: "maxReplicas must be at least 1."}).default(10),
 }).strict();

@@ -33,7 +33,7 @@ function mockServiceMetrics(scaling: {
               capacityPerReplica: 10,
               autoScaling: {
                 targetUtilization: 0.7,
-                tolerance: 0.25,
+                tolerance: 0.1,
                 maxScaleStep: scaling.maxScaleStep ?? 2,
                 maxReplicas: scaling.maxReplicas ?? 10,
               },
