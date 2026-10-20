@@ -23,7 +23,7 @@ import RiskAnalyzer from "../utils/RiskAnalyzer";
 import { TReplicaCount } from "../entities/TReplicaCount";
 import { TServiceDependency } from "../entities/TServiceDependency";
 import { CLookBackRealtimeData } from "../classes/Cacheable/CLookBackRealtimeData";
-import { Axios } from "axios";
+import axios, { Axios, AxiosInstance } from "axios";
 import GlobalSettings from "../GlobalSettings";
 import { TEndpointDependency } from "../entities/TEndpointDependency";
 import { TCombinedRealtimeData } from "../entities/TCombinedRealtimeData";
@@ -37,12 +37,12 @@ export default class ServiceOperator {
   private static instance?: ServiceOperator;
   static getInstance = () => this.instance || (this.instance = new this());
 
-  private externalProcessorClient: Axios;
+  private externalProcessorClient: AxiosInstance;
   private realtimeWorker?: Worker;
   private workerLatencyMap: Map<string, number>;
   private constructor() {
     this.workerLatencyMap = new Map();
-    this.externalProcessorClient = new Axios({
+    this.externalProcessorClient = axios.create({
       baseURL: GlobalSettings.ExternalDataProcessor,
       responseType: "json",
       decompress: true,

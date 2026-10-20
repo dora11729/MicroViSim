@@ -1,4 +1,4 @@
-import { Axios, AxiosRequestConfig, AxiosResponse } from "axios";
+import { AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import JsonToTS from "json-to-ts";
 import { inspect } from "util";
 import { TEndpointRequestParam } from "../entities/TEndpointDataType";
@@ -185,7 +185,7 @@ export default class Utils {
    * @returns Axios response, null if error
    */
   static async AxiosRequest<ReturnType>(
-    client: Axios,
+    client: AxiosInstance,
     method: "get" | "post" | "delete" | "put" | "head" | "patch" | "options",
     url: string,
     configs?: AxiosRequestConfig<any>

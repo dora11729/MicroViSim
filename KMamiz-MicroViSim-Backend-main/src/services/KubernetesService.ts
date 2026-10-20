@@ -1,4 +1,4 @@
-import { Axios, AxiosRequestConfig } from "axios";
+import axios, { AxiosInstance, AxiosRequestConfig } from "axios";
 import GlobalSettings from "../GlobalSettings";
 import { EnvoyLogs } from "../classes/EnvoyLog";
 import { PodList } from "../entities/external/PodList";
@@ -10,6 +10,7 @@ import Logger from "../utils/Logger";
 import { TRequestTypeUpper } from "../entities/TRequestType";
 import { readFileSync } from "fs";
 import { Agent } from "https";
+import { Axios } from "axios";
 
 export default class KubernetesService {
   private static instance?: KubernetesService;
@@ -20,7 +21,7 @@ export default class KubernetesService {
   private readonly serviceAccount =
     "/var/run/secrets/kubernetes.io/serviceaccount";
   private kubeApiHost: string;
-  private logClient!: Axios;
+  private logClient!: AxiosInstance;
   private currentNamespace: string = "";
   private constructor() {
     const config: AxiosRequestConfig<any> = {};
@@ -48,7 +49,7 @@ export default class KubernetesService {
     this.kubeApiHost = GlobalSettings.KubeApiHost;
     if (!this.kubeApiHost) Logger.fatal("Variable [KUBE_API_HOST] not set");
     config.baseURL = `${this.kubeApiHost}/api/v1`;
-    this.logClient = new Axios(config);
+    this.logClient = axios.create(config);
   }
 
   private async mustSuccessRequest<Type>(
@@ -154,7 +155,7 @@ export default class KubernetesService {
   async getNamespaces() {
     const { data } = await this.logClient.get("/namespaces", {
       responseType: "json",
-      transformResponse: (data) => JSON.parse(data),
+      transformResponse: (data: any) => JSON.parse(data),
     });
     return data.items.map(
       (namespace: any) => namespace.metadata.name,

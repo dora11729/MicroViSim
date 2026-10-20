@@ -1,4 +1,4 @@
-import { Axios } from "axios";
+import axios, { Axios, AxiosInstance } from "axios";
 import { Trace } from "../entities/external/Trace";
 import GlobalSettings from "../GlobalSettings";
 import Logger from "../utils/Logger";
@@ -11,10 +11,10 @@ export default class ZipkinService {
   private DEFAULT_LOOKBACK = 86400000 * 7; // 1 week
 
   private zipkinHost: string;
-  private zipkinClient: Axios;
+  private zipkinClient: AxiosInstance;
   private constructor() {
     this.zipkinHost = GlobalSettings.ZipkinUrl!;
-    this.zipkinClient = new Axios({
+    this.zipkinClient = axios.create({
       baseURL: `${this.zipkinHost}/zipkin/api/v2`,
       responseType: "json",
       decompress: true,

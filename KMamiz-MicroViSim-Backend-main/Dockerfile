@@ -17,7 +17,7 @@ RUN ["npm", "run", "test"]
 FROM installed AS prod-installed
 
 FROM ${APP_ENV}-installed AS build
-RUN ["npm", "i", "-g", "typescript"]
+RUN ["npm", "i", "-g", "typescript@4.9.5"]
 RUN ["tsc"]
 
 FROM base AS prod
