@@ -2,3 +2,6 @@ node_modules
 .vscode
 dist
 coverage
+simulator.log
+testReplica.ts
+*.yaml.save
