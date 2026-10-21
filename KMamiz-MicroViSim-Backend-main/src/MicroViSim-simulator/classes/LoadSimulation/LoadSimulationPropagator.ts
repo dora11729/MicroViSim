@@ -123,26 +123,35 @@ export default class LoadSimulationPropagator {
       stats.m2 += delta * delta2;
     };
 
-    // Track visited (endpoint::requestId) to avoid infinite recursion
-    const visited = new Set<string>();
+    // (endpoint::requestId) pairs on each request's current call path. A request may reach
+    // an endpoint again through another path (a diamond calls it twice), but never re-enter
+    // one already on its path, which would recurse forever around a cycle.
+    const onPath = new Set<string>();
+    const pathKey = (uniqueEndpointName: string, reqId: string) => `${uniqueEndpointName}::${reqId}`;
 
     // DFS to simulate errors and calculate actual latency for each request
     const dfsForPropagate = (
       uniqueEndpointName: string,
       requestIds: string[],
     ): { statusMap: Map<string, boolean>; latencyMap: Map<string, number> } => {
+      const enteredRequestIds = requestIds.filter(reqId => !onPath.has(pathKey(uniqueEndpointName, reqId)));
+      enteredRequestIds.forEach(reqId => onPath.add(pathKey(uniqueEndpointName, reqId)));
+      try {
+        return propagateAtEndpoint(uniqueEndpointName, enteredRequestIds);
+      } finally {
+        enteredRequestIds.forEach(reqId => onPath.delete(pathKey(uniqueEndpointName, reqId)));
+      }
+    };
+
+    const propagateAtEndpoint = (
+      uniqueEndpointName: string,
+      filteredRequestIds: string[],
+    ): { statusMap: Map<string, boolean>; latencyMap: Map<string, number> } => {
 
       const currentStatus = new Map<string, boolean>();
       const totalLatencyMap = new Map<string, number>();
       const ownLatencyMap = new Map<string, number>();
 
-      // Filter out requestIds that have already visited this endpoint
-      const filteredRequestIds = requestIds.filter(reqId => {
-        const key = `${uniqueEndpointName}::${reqId}`;
-        if (visited.has(key)) return false;
-        visited.add(key);
-        return true;
-      });
       if (filteredRequestIds.length === 0) {
         return { statusMap: currentStatus, latencyMap: totalLatencyMap };
       }

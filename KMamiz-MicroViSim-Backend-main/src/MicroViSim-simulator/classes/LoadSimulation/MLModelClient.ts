@@ -1,14 +1,10 @@
-export type MLModelType = "xgboost" | "random_forest" | "lstm";
+export type MLModelType = "arima" | "bilstm" | "gru";
 
-export interface MLPredictFeatures {
-  replicaCount: number;
-  requestCountPerSecond: number;
-  replicaMaxRPS: number;
-  service: number;  // 訓練時 1~4，模擬預測時傳 0
-}
-
-// LSTM 專用：過去 10 個時間步的 features
-export type MLPredictSequence = MLPredictFeatures[];
+export type TMLTrainingService = {
+  service: string;            // uniqueServiceName
+  dailyRequestCount: number;  // total external daily requests of the service
+  model: MLModelType;
+};
 
 export default class MLModelClient {
   private static instance?: MLModelClient;
@@ -20,31 +16,45 @@ export default class MLModelClient {
     this.baseUrl = process.env.ML_SERVICE_URL ?? "http://localhost:8000";
   }
 
-  async predictNextRequestCount(
-    model: MLModelType,
-    featuresOrSequence: MLPredictFeatures | MLPredictSequence
-  ): Promise<number | null> {
-    const body =
-      model === "lstm"
-        ? { model, sequence: featuresOrSequence }
-        : { model, features: featuresOrSequence };
+  // Throws on failure: without trained models there is nothing to scale by.
+  async train(services: TMLTrainingService[]): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/train`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ services }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(`ML training failed (HTTP ${res.status}): ${body.detail ?? "no detail"}`);
+    }
+    const body = await res.json();
+    console.log(
+      `[MLModelClient] ${services.length} model(s) ready ` +
+      `(${body.splitMethod} split${body.cached ? ", cached" : ""})`
+    );
+  }
 
+  /*
+    One-step predictions of the percent-of-day share for every slot. predictions[t]
+    is computed from shares[0..t-1] only; null where history is too short. Returns
+    null when the ML service fails, so the caller can fall back for the whole run.
+  */
+  async predictShares(
+    service: string,
+    model: MLModelType,
+    shares: number[]
+  ): Promise<(number | null)[] | null> {
     try {
       const res = await fetch(`${this.baseUrl}/predict`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ service, model, shares }),
       });
       if (!res.ok) {
-        console.error(
-          `[MLModelClient] predict failed: ${model} returned HTTP ${res.status}`
-        );
+        console.error(`[MLModelClient] predict failed: ${model} for ${service} returned HTTP ${res.status}`);
         return null;
       }
-      const data = (await res.json()) as {
-        predicted_request_count_per_second: number;
-      };
-      return data.predicted_request_count_per_second;
+      return ((await res.json()) as { predictions: (number | null)[] }).predictions;
     } catch (e) {
       console.error("[MLModelClient] predict failed:", e);
       return null;

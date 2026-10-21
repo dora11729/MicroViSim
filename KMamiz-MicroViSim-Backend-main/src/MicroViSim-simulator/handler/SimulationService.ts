@@ -4,7 +4,6 @@ import SimulationConfigManager from "../classes/SimulationConfigManager";
 import ServiceOperator from "../../services/ServiceOperator";
 import ImportExportHandler from "../../services/ImportExportHandler";
 import multer from "multer";
-import YAML from "yamljs";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -102,29 +101,6 @@ export default class SimulationService extends IRequestHandler {
       //clear all simulator data first
       await ImportExportHandler.getInstance().clearData();
 
-      // Parse YAML and extract which models are used
-      const parsedConfig = YAML.parse(yamlData);
-      const modelsToTrain = this.extractModelsFromConfig(parsedConfig);
-
-      if (modelsToTrain.length > 0) {
-        const mlServiceUrl = process.env.ML_SERVICE_URL ?? "http://localhost:8000";
-        const trainRes = await fetch(`${mlServiceUrl}/train`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ models: modelsToTrain }),
-        });
-
-        if (!trainRes.ok) {
-          const body = await trainRes.json();
-          // dataset 不存在時只 warn，不中斷模擬
-          if (trainRes.status === 404) {
-            console.warn("[SimulationService] No dataset found, skipping training.");
-          } else {
-            return { status: 500, message: `Training failed: ${body.detail}` };
-          }
-        }
-      }
-
       //retrieve data from yaml
       const simulationResult = await Simulator.getInstance().generateSimulationDataFromConfig(
         yamlData, simulateDate
@@ -173,20 +149,5 @@ export default class SimulationService extends IRequestHandler {
         message: `Error simulate retrive data by YAML:\n---\n${err instanceof Error ? err.message : err}`,
       };
     }
-  }
-
-  // find out which models are used in the config, so that we know which model(s) to train before simulation
-  private extractModelsFromConfig(parsedConfig: any): string[] {
-    const models = new Set<string>();
-    const serviceMetrics = parsedConfig?.loadSimulation?.serviceMetrics ?? [];
-    for (const ns of serviceMetrics) {
-      for (const svc of ns.services ?? []) {
-        for (const ver of svc.versions ?? []) {
-          const model = ver.autoScaling?.model;
-          if (model) models.add(model);
-        }
-      }
-    }
-    return Array.from(models);
   }
 }

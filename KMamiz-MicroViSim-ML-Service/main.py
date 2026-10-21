@@ -1,24 +1,27 @@
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from services.predict import router as predict_router
-from services.model_loader import load_all_models
-from services.train import router as train_router
+
 from dotenv import load_dotenv
-import os
+from fastapi import FastAPI
+
+from services.model_store import clear_trained_models
+from services.predict import router as predict_router
+from services.train import router as train_router
 
 load_dotenv()
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 啟動時載入模型
-    load_all_models()
+    # Models are trained per service on demand and loaded per request, so nothing is
+    # preloaded; the previous container's models are discarded instead.
+    clear_trained_models()
     yield
-    # 關閉時清理（如有需要）
+
 
 app = FastAPI(
     title="MicroViSim ML Sidecar",
-    version="1.0.0",
-    lifespan=lifespan
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 app.include_router(predict_router)

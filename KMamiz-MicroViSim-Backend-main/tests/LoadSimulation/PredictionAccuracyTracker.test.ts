@@ -5,11 +5,11 @@ const Service = "order\tdefault\tv1";
 describe("PredictionAccuracyTracker", () => {
   it("scores the model and the naive predictor separately", () => {
     const tracker = new PredictionAccuracyTracker();
-    tracker.record(Service, "lstm", { actual: 10, predicted: 12, naive: 14 });
-    tracker.record(Service, "lstm", { actual: 10, predicted: 8, naive: 4 });
+    tracker.record(Service, "bilstm", { actual: 10, predicted: 12, naive: 14 });
+    tracker.record(Service, "bilstm", { actual: 10, predicted: 8, naive: 4 });
 
     const [accuracy] = tracker.getAccuracies();
-    expect(accuracy.model).toBe("lstm");
+    expect(accuracy.model).toBe("bilstm");
     expect(accuracy.slots).toBe(2);
     expect(accuracy.modelMAE).toBeCloseTo(2, 10);
     expect(accuracy.modelRMSE).toBeCloseTo(2, 10);
@@ -19,7 +19,7 @@ describe("PredictionAccuracyTracker", () => {
 
   it("reports a perfect prediction as zero error", () => {
     const tracker = new PredictionAccuracyTracker();
-    tracker.record(Service, "xgboost", { actual: 7, predicted: 7, naive: 3 });
+    tracker.record(Service, "arima", { actual: 7, predicted: 7, naive: 3 });
 
     const [accuracy] = tracker.getAccuracies();
     expect(accuracy.modelMAE).toBe(0);
