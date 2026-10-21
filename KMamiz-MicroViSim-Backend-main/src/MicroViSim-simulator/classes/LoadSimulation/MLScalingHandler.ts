@@ -1,123 +1,133 @@
-import MLModelClient, { MLModelType, MLPredictFeatures, MLPredictSequence } from "./MLModelClient";
+import MLModelClient, { MLModelType, TMLTrainingService } from "./MLModelClient";
+import PredictedLoadPropagator, { TPredictedServiceLoad, TServiceTrafficProfile } from "./PredictedLoadPropagator";
+import SimulatorUtils from "../SimulatorUtils";
+import {
+  TSimulationEndpointMetric,
+  TSimulationNamespaceServiceMetrics,
+} from "../../entities/TSimConfigLoadSimulation";
+import {
+  TCMetricsPerTimeSlot,
+  TDependOnMapWithCallProbability,
+} from "../../entities/TLoadSimulation";
 
 const SECONDS_PER_HOUR = 3600;
-const LSTM_WINDOW_SIZE = 10;
+const PERCENT = 100;
 
 /*
-  Why a prediction was not usable, so callers can report how often they fell back.
-  insufficientHistory: LSTM needs LSTM_WINDOW_SIZE preceding slots, so the first 10 slots of a simulation can never use the model. 
-  serviceUnavailable: ML sidecar errored.
+  Models predict each hour's share of the day's traffic (percent), per service, so a
+  prediction becomes RPS through that service's configured external daily total:
+    RPS = share * D_S / 100 / 3600
 */
-export type TMLFallbackReason = "insufficientHistory" | "serviceUnavailable";
-
-export type TMLPredictionOutcome =
-  | { status: "ok"; predictedRPS: number }
-  | { status: "fallback"; reason: TMLFallbackReason };
-
 export default class MLScalingHandler {
   private static instance?: MLScalingHandler;
   static getInstance = () => this.instance || (this.instance = new this());
 
   private mlClient: MLModelClient;
+  private propagator = new PredictedLoadPropagator();
 
   private constructor() {
     this.mlClient = MLModelClient.getInstance();
   }
 
-  /**
-   * 用 ML 模型預測下一個時間步的 requestCountPerSecond
-   * service 在訓練時是 1~4 的 category code，預測時傳 0 表示未知/模擬中的 service
-   */
-  async predictNextRPS(
-    model: MLModelType,
-    currentFeatures: {
-      replicaCount: number;
-      requestCountPerSecond: number;
-      replicaMaxRPS: number;
-    },
-    // LSTM 專用：過去 WINDOW_SIZE 個時間步的資料，按時間升序排列
-    history?: Array<{
-      replicaCount: number;
-      requestCountPerSecond: number;
-      replicaMaxRPS: number;
-    }>
-  ): Promise<TMLPredictionOutcome> {
+  /*
+    Predicted RPS per slot for every service whose autoScaling names a model. Nothing
+    here depends on scaling decisions, so the whole table is built before the scaling
+    loop runs. Throws if training fails.
+  */
+  async planPredictedLoads(input: {
+    serviceMetrics: TSimulationNamespaceServiceMetrics[];
+    endpointMetrics: TSimulationEndpointMetric[];
+    dependOnMap: TDependOnMapWithCallProbability;
+    metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>;
+    sortedTimeSlotKeys: string[];
+  }): Promise<Map<string, Map<string, TPredictedServiceLoad>>> {
+    const modelServices = this.modelServices(input.serviceMetrics);
+    if (modelServices.size === 0) return new Map();
 
-    if (model === "lstm") {
-      return this.predictWithLSTM(history);
-    }
-    return this.predictWithTabular(model, currentFeatures);
-  }
+    const profile = this.buildTrafficProfile(input.endpointMetrics);
+    const training = this.trainingServices(profile, modelServices);
+    const ownPredictions = new Map<string, (number | null)[] | null>();
 
-  private async predictWithTabular(
-    model: MLModelType,
-    features: { replicaCount: number; requestCountPerSecond: number; replicaMaxRPS: number }
-  ): Promise<TMLPredictionOutcome> {
-    const payload: MLPredictFeatures = {
-      replicaCount: features.replicaCount,
-      requestCountPerSecond: features.requestCountPerSecond,
-      replicaMaxRPS: features.replicaMaxRPS,
-      service: 0,  // 訓練時是 1~4，預測模擬中的 service 時傳 0
-    };
-    const predictedRPS = await this.mlClient.predictNextRequestCount(model, payload);
-    return predictedRPS === null
-      ? { status: "fallback", reason: "serviceUnavailable" }
-      : { status: "ok", predictedRPS };
-  }
-
-  private async predictWithLSTM(
-    history?: Array<{ replicaCount: number; requestCountPerSecond: number; replicaMaxRPS: number }>
-  ): Promise<TMLPredictionOutcome> {
-    if (!history || history.length < LSTM_WINDOW_SIZE) {
-      // 歷史資料不足，無法使用 LSTM
-      return { status: "fallback", reason: "insufficientHistory" };
+    if (training.length > 0) {
+      await this.mlClient.train(training);
+      for (const { service, model, dailyRequestCount } of training) {
+        const shares = this.observedShares(service, profile, input.sortedTimeSlotKeys, input.metricsPerTimeSlotMap);
+        const predicted = await this.mlClient.predictShares(service, model, shares);
+        ownPredictions.set(service, predicted && predicted.map(
+          share => share === null ? null : this.shareToRPS(share, dailyRequestCount)
+        ));
+      }
     }
 
-    // 取最近 WINDOW_SIZE 筆，按時間升序
-    const sequenceWindow  = history.slice(-LSTM_WINDOW_SIZE);
-
-    const sequence: MLPredictSequence = sequenceWindow.map(step => ({
-      replicaCount: step.replicaCount,
-      requestCountPerSecond: step.requestCountPerSecond,
-      replicaMaxRPS: step.replicaMaxRPS,
-      service: 0,
-    }));
-
-    const predictedRPS = await this.mlClient.predictNextRequestCount("lstm", sequence);
-    return predictedRPS === null
-      ? { status: "fallback", reason: "serviceUnavailable" }
-      : { status: "ok", predictedRPS };
-  }
-
-  /**
-   * 從已排序的 timeSlotKeys 中，取得某個 service 在 currentTimeSlotKey 之前的歷史資料
-   * 用於 LSTM 的 sequence 建構
-   */
-  buildHistoryWindow(
-    uniqueServiceName: string,
-    currentTimeSlotKey: string,
-    sortedTimeSlotKeys: string[],
-    serviceReceivedRequestCount: Map<string, Map<string, number>>,
-    metricsPerTimeSlotMap: Map<string, any>,  // TCMetricsPerTimeSlot
-  ): Array<{ replicaCount: number; requestCountPerSecond: number; replicaMaxRPS: number }> | null {
-    const currentIndex = sortedTimeSlotKeys.indexOf(currentTimeSlotKey);
-    if (currentIndex < LSTM_WINDOW_SIZE) return null;
-
-    const windowKeys = sortedTimeSlotKeys.slice(
-      currentIndex - LSTM_WINDOW_SIZE,
-      currentIndex
-    );
-
-    return windowKeys.map(key => {
-      const counts = serviceReceivedRequestCount.get(key);
-      const metrics = metricsPerTimeSlotMap.get(key);
-      const requestCountInHour = counts?.get(uniqueServiceName) ?? 0;
-
-      return {
-        replicaCount: metrics?.getServiceReplicaCount(uniqueServiceName) ?? 0,
-        requestCountPerSecond: requestCountInHour / SECONDS_PER_HOUR,
-        replicaMaxRPS: metrics?.getServiceCapacityPerReplica(uniqueServiceName) ?? 0,
-      };
+    return this.propagator.propagate({
+      sortedTimeSlotKeys: input.sortedTimeSlotKeys,
+      profile,
+      dependOnMap: input.dependOnMap,
+      metricsPerTimeSlotMap: input.metricsPerTimeSlotMap,
+      ownPredictions,
+      modelServices: Array.from(modelServices.keys()),
     });
+  }
+
+  buildTrafficProfile(endpointMetrics: TSimulationEndpointMetric[]): TServiceTrafficProfile {
+    const profile: TServiceTrafficProfile = {
+      endpointDaily: new Map(),
+      serviceDaily: new Map(),
+      endpointsOfService: new Map(),
+    };
+    for (const metric of endpointMetrics) {
+      if (!metric.uniqueEndpointName) continue;
+      const endpoint = metric.uniqueEndpointName;
+      const service = SimulatorUtils.extractUniqueServiceNameFromEndpointName(endpoint);
+      const daily = metric.expectedExternalDailyRequestCount;
+      profile.endpointDaily.set(endpoint, daily);
+      profile.serviceDaily.set(service, (profile.serviceDaily.get(service) ?? 0) + daily);
+      profile.endpointsOfService.set(service, [...(profile.endpointsOfService.get(service) ?? []), endpoint]);
+    }
+    return profile;
+  }
+
+  modelServices(serviceMetrics: TSimulationNamespaceServiceMetrics[]): Map<string, MLModelType> {
+    const models = new Map<string, MLModelType>();
+    for (const ns of serviceMetrics) {
+      for (const svc of ns.services) {
+        for (const ver of svc.versions) {
+          if (ver.uniqueServiceName && ver.autoScaling?.model) {
+            models.set(ver.uniqueServiceName, ver.autoScaling.model);
+          }
+        }
+      }
+    }
+    return models;
+  }
+
+  // Only services with external traffic get a model of their own; the rest are
+  // reached through propagation.
+  trainingServices(profile: TServiceTrafficProfile, modelServices: Map<string, MLModelType>): TMLTrainingService[] {
+    return Array.from(modelServices.entries())
+      .filter(([service]) => (profile.serviceDaily.get(service) ?? 0) > 0)
+      .map(([service, model]) => ({ service, model, dailyRequestCount: profile.serviceDaily.get(service)! }))
+      .sort((a, b) => a.service.localeCompare(b.service));
+  }
+
+  // External arrivals only: the models learnt the share of external daily traffic.
+  observedShares(
+    service: string,
+    profile: TServiceTrafficProfile,
+    sortedTimeSlotKeys: string[],
+    metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>
+  ): number[] {
+    const daily = profile.serviceDaily.get(service) ?? 0;
+    const endpoints = profile.endpointsOfService.get(service) ?? [];
+    return sortedTimeSlotKeys.map(key => {
+      const metrics = metricsPerTimeSlotMap.get(key);
+      const count = endpoints.reduce((sum, e) => sum + (metrics?.getEntryPointRequestCount(e) ?? 0), 0);
+      return daily > 0 ? count / daily * PERCENT : 0;
+    });
+  }
+
+  // A negative share is a model artefact, not demand.
+  shareToRPS(share: number, dailyRequestCount: number): number {
+    return Math.max(0, share) * dailyRequestCount / PERCENT / SECONDS_PER_HOUR;
   }
 }

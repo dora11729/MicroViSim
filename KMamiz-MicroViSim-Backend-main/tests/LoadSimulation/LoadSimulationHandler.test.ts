@@ -1,10 +1,15 @@
 import LoadSimulationHandler from "../../src/MicroViSim-simulator/classes/LoadSimulation/LoadSimulationHandler";
+import MLModelClient, { MLModelType } from "../../src/MicroViSim-simulator/classes/LoadSimulation/MLModelClient";
 import SimulatorUtils from "../../src/MicroViSim-simulator/classes/SimulatorUtils";
 import {
   TCMetricsPerTimeSlot,
   TEndpointPropagationStatsForOneTimeSlot,
 } from "../../src/MicroViSim-simulator/entities/TLoadSimulation";
-import { TSimulationNamespaceServiceMetrics } from "../../src/MicroViSim-simulator/entities/TSimConfigLoadSimulation";
+import {
+  TLoadSimulationSettings,
+  TSimulationEndpointMetric,
+  TSimulationNamespaceServiceMetrics,
+} from "../../src/MicroViSim-simulator/entities/TSimConfigLoadSimulation";
 
 const SecondsPerHour = 3600;
 const ServiceName = "order";
@@ -16,10 +21,13 @@ const UniqueEndpointName = SimulatorUtils.generateUniqueEndpointName(
   ServiceName, Namespace, Version, "GET", "/orders"
 );
 
-function mockServiceMetrics(scaling: {
+type TScalingOptions = {
   maxScaleStep?: number;
   maxReplicas?: number;
-} = {}): TSimulationNamespaceServiceMetrics[] {
+  model?: MLModelType;
+};
+
+function mockServiceMetrics(scaling: TScalingOptions = {}): TSimulationNamespaceServiceMetrics[] {
   return [
     {
       namespace: Namespace,
@@ -32,6 +40,7 @@ function mockServiceMetrics(scaling: {
               version: Version,
               capacityPerReplica: 10,
               autoScaling: {
+                model: scaling.model,
                 targetUtilization: 0.7,
                 tolerance: 0.1,
                 maxScaleStep: scaling.maxScaleStep ?? 2,
@@ -43,6 +52,19 @@ function mockServiceMetrics(scaling: {
       ],
     },
   ];
+}
+
+function mockEndpointMetric(expectedExternalDailyRequestCount: number): TSimulationEndpointMetric {
+  return {
+    uniqueEndpointName: UniqueEndpointName,
+    endpointId: "order-get-orders",
+    delay: [{ type: "jitter", latencyMs: 0, jitterMs: 0 }],
+    maxLatencyMs: 0,
+    timeoutMs: 0,
+    errorRatePercentage: 0,
+    expectedExternalDailyRequestCount,
+    fallbackStrategy: "failIfAnyDependentFail",
+  };
 }
 
 function mockStats(requestCount: number): TEndpointPropagationStatsForOneTimeSlot {
@@ -65,6 +87,7 @@ function mockTimeline(rpsPerSlot: number[], baseReplicaCount: number) {
     propagationResults.set(timeSlotKey, new Map([[UniqueEndpointName, mockStats(rps * SecondsPerHour)]]));
 
     const metrics = new TCMetricsPerTimeSlot();
+    metrics.setEntryPointRequestCount(UniqueEndpointName, rps * SecondsPerHour);
     metrics.setServiceReplicaCount(UniqueServiceName, baseReplicaCount);
     metrics.setServiceCapacityPerReplica(UniqueServiceName, 10);
     metricsPerTimeSlotMap.set(timeSlotKey, metrics);
@@ -76,12 +99,18 @@ function mockTimeline(rpsPerSlot: number[], baseReplicaCount: number) {
 async function scale(
   rpsPerSlot: number[],
   baseReplicaCount = 1,
-  scaling?: { maxScaleStep?: number; maxReplicas?: number }
+  scaling?: TScalingOptions,
+  dailyRequestCount = 0
 ): Promise<number[]> {
   const { propagationResults, metricsPerTimeSlotMap } = mockTimeline(rpsPerSlot, baseReplicaCount);
+  const settings: Pick<TLoadSimulationSettings, "serviceMetrics" | "endpointMetrics"> = {
+    serviceMetrics: mockServiceMetrics(scaling),
+    endpointMetrics: [mockEndpointMetric(dailyRequestCount)],
+  };
   await (LoadSimulationHandler.getInstance() as any).applyAutoScalingForTimeSlot(
+    settings,
+    new Map(),
     propagationResults,
-    mockServiceMetrics(scaling),
     metricsPerTimeSlotMap
   );
   return rpsPerSlot.map(
@@ -115,5 +144,32 @@ describe("LoadSimulationHandler auto-scaling", () => {
 
   it("scales back down once the load is gone", async () => {
     expect(await scale([50, 50, 0, 0, 0])).toEqual([1, 3, 5, 3, 1]);
+  });
+});
+
+describe("LoadSimulationHandler model-driven auto-scaling", () => {
+  const client = MLModelClient.getInstance();
+  // 360000 requests a day turn an N% share into N RPS.
+  const Daily = 360000;
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it("sizes each slot from the predicted load instead of the last one", async () => {
+    const train = jest.spyOn(client, "train").mockResolvedValue();
+    jest.spyOn(client, "predictShares").mockResolvedValue([null, 21, 21, 21]);
+
+    expect(await scale([1, 1, 1, 1], 1, { model: "gru" }, Daily)).toEqual([1, 3, 3, 3]);
+    expect(train).toHaveBeenCalledWith([{ service: UniqueServiceName, model: "gru", dailyRequestCount: Daily }]);
+  });
+
+  it("scales reactively when the model cannot predict", async () => {
+    jest.spyOn(client, "train").mockResolvedValue();
+    jest.spyOn(client, "predictShares").mockResolvedValue(null);
+    expect(await scale([1, 21, 1, 1], 1, { model: "gru" }, Daily)).toEqual([1, 1, 3, 1]);
+  });
+
+  it("fails when training fails", async () => {
+    jest.spyOn(client, "train").mockRejectedValue(new Error("ML training failed"));
+    await expect(scale([1, 1], 1, { model: "gru" }, Daily)).rejects.toThrow(/training failed/);
   });
 });

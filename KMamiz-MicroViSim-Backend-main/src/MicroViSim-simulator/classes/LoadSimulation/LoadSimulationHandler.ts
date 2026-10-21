@@ -20,7 +20,8 @@ import LoadSimulationPropagator from "./LoadSimulationPropagator";
 import FaultInjector from "./FaultInjector";
 import OverloadErrorRateAndLatencyEstimator from "./OverloadErrorRateAndLatencyEstimator";
 import SimulatorUtils from "../SimulatorUtils";
-import MLScalingHandler, { TMLFallbackReason } from "./MLScalingHandler";
+import MLScalingHandler from "./MLScalingHandler";
+import { TMLFallbackReason } from "./PredictedLoadPropagator";
 import PredictionAccuracyTracker from "./PredictionAccuracyTracker";
 import SimulationRandom from "../SimulationRandom";
 
@@ -94,8 +95,9 @@ export default class LoadSimulationHandler {
 
     // Apply auto-scaling decisions based on basic error rate propagation
     await this.applyAutoScalingForTimeSlot(
+      loadSimulationSettings,
+      dependOnMapWithCallProbability,
       propagationResultsWithBasicError,
-      loadSimulationSettings.serviceMetrics,
       metricsPerTimeSlotMap
     )
 
@@ -454,17 +456,28 @@ export default class LoadSimulationHandler {
     判斷service是否開啟autoScaling，有的話判斷是否進行scale
 
       no model => reactive HPA, the naive "next RPS = last RPS"
-      model    => predicts slot t from the history ending at t-1
+      model    => predicted RPS: the service's own share-of-day model plus whatever
+                  predicted load its callers pass down (MLScalingHandler)
   */
   private async applyAutoScalingForTimeSlot(
+    loadSimulationSettings: TLoadSimulationSettings,
+    dependOnMapWithCallProbability: TDependOnMapWithCallProbability,
     propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
-    serviceMetrics: TSimulationNamespaceServiceMetrics[],
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>,
   ) {
+    const serviceMetrics = loadSimulationSettings.serviceMetrics;
     const serviceReceivedRequestCount = this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithBasicError);
     const sortedTimeSlotKeys = Array.from(metricsPerTimeSlotMap.keys()).sort(
       (a, b) => this.timeSlotKeyToMinutes(a) - this.timeSlotKeyToMinutes(b)
     );
+
+    const predictedLoads = await this.mlScalingHandler.planPredictedLoads({
+      serviceMetrics,
+      endpointMetrics: loadSimulationSettings.endpointMetrics,
+      dependOnMap: dependOnMapWithCallProbability,
+      metricsPerTimeSlotMap,
+      sortedTimeSlotKeys,
+    });
 
     // ns: namespace
     const dataset = [];
@@ -483,7 +496,7 @@ export default class LoadSimulationHandler {
 
           // 有開 autoScaling
           // model: null => 只有 threshold 決定是否 scale (簡易 HPA 邏輯)
-          // model: not null => ML bodel (xgboost, random_forest, lstm) 預測下一個時間點的 request count，再決定是否 scale
+          // model: not null => 用 ML model (arima, bilstm, gru) 預測的 RPS 決定是否 scale
           const uniqueServiceName = ver.uniqueServiceName;
           const model = ver.autoScaling.model ?? null;
           const { targetUtilization, tolerance, maxScaleStep, maxReplicas } = ver.autoScaling;
@@ -522,30 +535,12 @@ export default class LoadSimulationHandler {
             let predictedRequestCountPerSecond = lastRequestCountPerSecond;
 
             if (model !== null) {
-              const history = model === "lstm"
-                ? this.mlScalingHandler.buildHistoryWindow(
-                  uniqueServiceName,
-                  timeSlotKey,
-                  sortedTimeSlotKeys,
-                  serviceReceivedRequestCount,
-                  metricsPerTimeSlotMap
-                )
-                : undefined;
-
-              const outcome = await this.mlScalingHandler.predictNextRPS(
-                model,
-                {
-                  replicaCount: currentReplicaCount,
-                  requestCountPerSecond: lastRequestCountPerSecond,
-                  replicaMaxRPS,
-                },
-                history ?? undefined
-              );
-
-              if (outcome.status === "ok") {
-                predictedRequestCountPerSecond = outcome.predictedRPS;
+              const predictedLoad = predictedLoads.get(timeSlotKey)?.get(uniqueServiceName);
+              if (predictedLoad?.status === "ok") {
+                predictedRequestCountPerSecond = predictedLoad.rps;
               } else {
-                this.recordFallback(fallbackCounts, uniqueServiceName, outcome.reason);
+                this.recordFallback(fallbackCounts, uniqueServiceName,
+                  predictedLoad?.status === "fallback" ? predictedLoad.reason : "noPredictionSource");
               }
             }
 

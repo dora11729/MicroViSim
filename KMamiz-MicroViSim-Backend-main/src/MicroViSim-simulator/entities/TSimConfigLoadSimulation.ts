@@ -75,13 +75,13 @@ export const loadSimulationConfigSchema = z.object({
 
 // Service metric
 const autoScalingModels = [
-  "xgboost", 
-  "random_forest", 
-  "lstm"
+  "arima",
+  "bilstm",
+  "gru"
 ] as const;
 
 export const simulationServiceVersionScalingSchema = z.object({
-  model: z.enum(autoScalingModels, { message: "model must be one of 'xgboost', 'random_forest', or 'lstm'." })
+  model: z.enum(autoScalingModels, { message: "model must be one of 'arima', 'bilstm', or 'gru'." })
     .optional(),
   targetUtilization: z.number()
     .min(0.01, {message: "targetUtilization must be at least 0.01."})
