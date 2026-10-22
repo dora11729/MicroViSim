@@ -311,18 +311,12 @@ export default class LoadSimulationHandler {
 
   ): number[] {
 
-    /*
-      Generate random weights for distributing request counts across all time slots  
-      with flat: ±20%, unimodal, bimodal and custom: ±10% fluctuation.
-      (TODO:後續可找幾篇論文研究真實流量波動範圍，然後調整此設計！！)
-    */
-    const FLAT_JITTER = 0.2;
-    const SHAPED_JITTER = 0.1;
-    
-    const jitter = data.trafficPattern.shape === "flat" ? FLAT_JITTER : SHAPED_JITTER;
+    // Random weights around the shape, so no two days are identical.
+    // (TODO:後續可找幾篇論文研究真實流量波動範圍，然後調整 fluctuation 的預設值！！)
+    const { fluctuation } = data.trafficPattern;
     const shapeWeights = this.buildShapeWeights(data.timeSlotCountPerDay, data.trafficPattern);
     const weights = shapeWeights.map(shapeWeight => {
-      return shapeWeight * (1 + (this.random.next() * 2 * jitter - jitter));
+      return shapeWeight * (1 + (this.random.next() * 2 * fluctuation - fluctuation));
     });
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
     const normalizedWeights = weights.map(w => w / totalWeight);

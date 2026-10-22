@@ -12,10 +12,10 @@ const DailyRequestCount = 240000;
 const accepts = (trafficPattern: object) => loadSimulationConfigSchema.safeParse({ trafficPattern }).success;
 
 function mockPattern(pattern: Partial<TSimulationTrafficPattern> = {}): TSimulationTrafficPattern {
-  return { shape: "flat", peakHour: 14, secondPeakHour: 19, peakRatio: 3, ...pattern };
+  return { shape: "flat", peakHour: 14, secondPeakHour: 19, peakRatio: 3, fluctuation: 0.2, ...pattern };
 }
 
-// Reseeds first so the ±20% jitter is identical on every run.
+// Reseeds first so the ±20% fluctuation is identical on every run.
 function distribute(
   pattern: TSimulationTrafficPattern,
   simulationDurationInDays = 1
@@ -30,7 +30,7 @@ function distribute(
 }
 
 describe("LoadSimulationHandler traffic pattern", () => {
-  it("spreads a flat day evenly apart from the jitter", () => {
+  it("spreads a flat day evenly apart from the fluctuation", () => {
     const [day] = distribute(mockPattern());
     expect(Math.max(...day) / Math.min(...day)).toBeLessThan(2);
   });
@@ -43,12 +43,12 @@ describe("LoadSimulationHandler traffic pattern", () => {
 
   it("makes the peak hour busier than its opposite", () => {
     const [day] = distribute(mockPattern({ shape: "unimodal", peakHour: 14, peakRatio: 3 }));
-    // 3x shape either side of ±20% jitter still leaves the two well apart.
+    // 3x shape either side of ±20% fluctuation still leaves the two well apart.
     expect(day[14] / day[2]).toBeGreaterThan(2);
   });
 
   it("moves the busy period with peakHour", () => {
-    // Neighbouring slots differ by ~1% of shape, far less than the jitter, so compare
+    // Neighbouring slots differ by ~1% of shape, far less than the fluctuation, so compare
     // slots half a day apart where the shape difference is the full peakRatio.
     const [early] = distribute(mockPattern({ shape: "unimodal", peakHour: 6 }));
     const [late] = distribute(mockPattern({ shape: "unimodal", peakHour: 18 }));
@@ -56,13 +56,17 @@ describe("LoadSimulationHandler traffic pattern", () => {
     expect(late[18]).toBeGreaterThan(late[6]);
   });
 
-  it("jitters a shaped profile less than a flat one", () => {
-    // peakRatio 1 flattens the shape, so the two runs differ only in jitter amplitude,
-    // and the shared seed means they draw the same underlying numbers.
+  it("fluctuates by the configured amount", () => {
+    // The shared seed draws the same underlying numbers, so only the amplitude differs.
     const spread = (day: number[]) => Math.max(...day) / Math.min(...day);
-    const [flat] = distribute(mockPattern());
-    const [shaped] = distribute(mockPattern({ shape: "unimodal", peakRatio: 1 }));
-    expect(spread(shaped)).toBeLessThan(spread(flat));
+    const [wide] = distribute(mockPattern({ fluctuation: 0.2 }));
+    const [narrow] = distribute(mockPattern({ fluctuation: 0.05 }));
+    expect(spread(narrow)).toBeLessThan(spread(wide));
+  });
+
+  it("follows the shape exactly without fluctuation", () => {
+    const [day] = distribute(mockPattern({ fluctuation: 0 }));
+    expect(day).toEqual(new Array(SlotsPerDay).fill(DailyRequestCount / SlotsPerDay));
   });
 
   it("treats peakRatio 1 as flat", () => {
@@ -88,7 +92,7 @@ describe("LoadSimulationHandler traffic pattern", () => {
     expect(day[9] / day[14]).toBeGreaterThan(1.5);
     expect(day[19] / day[14]).toBeGreaterThan(1.5);
     // The midday dip still outranks the small hours. Summed over a window because a
-    // single slot's shape difference here is no bigger than the jitter.
+    // single slot's shape difference here is no bigger than the fluctuation.
     const window = (from: number) => day.slice(from, from + 3).reduce((a, b) => a + b, 0);
     expect(window(13) / window(1)).toBeGreaterThan(1.2);
   });
@@ -115,10 +119,8 @@ describe("LoadSimulationHandler traffic pattern", () => {
   });
 
   it("follows custom hourly multipliers and leaves the other hours empty", () => {
-    const [day] = distribute(mockPattern({ shape: "custom", hourlyMultipliers: [2, 1, 0, 1] }));
-    // 2x either side of ±10% jitter.
-    expect(day[0] / day[1]).toBeGreaterThan(1.6);
-    expect(day[0] / day[1]).toBeLessThan(2.5);
+    const [day] = distribute(mockPattern({ shape: "custom", hourlyMultipliers: [2, 1, 0, 1], fluctuation: 0 }));
+    expect(day[0]).toBe(2 * day[1]);
     expect(day[2]).toBe(0);
     expect(day.slice(4)).toEqual(new Array(SlotsPerDay - 4).fill(0));
     expect(day.reduce((a, b) => a + b, 0)).toBe(DailyRequestCount);
@@ -126,6 +128,11 @@ describe("LoadSimulationHandler traffic pattern", () => {
 });
 
 describe("trafficPattern schema", () => {
+  it("rejects a fluctuation outside [0, 1)", () => {
+    expect(accepts({ fluctuation: -0.1 })).toBe(false);
+    expect(accepts({ fluctuation: 1 })).toBe(false);
+  });
+
   it("accepts custom multipliers for up to a whole day", () => {
     expect(accepts({ shape: "custom", hourlyMultipliers: [1, 0.5] })).toBe(true);
     expect(accepts({ shape: "custom", hourlyMultipliers: new Array(24).fill(1) })).toBe(true);

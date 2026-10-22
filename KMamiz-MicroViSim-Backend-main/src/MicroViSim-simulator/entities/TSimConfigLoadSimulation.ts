@@ -34,6 +34,11 @@ const trafficPatternSchema = z.object({
     .min(1, { message: "peakRatio must be at least 1." })
     .max(20, { message: "peakRatio cannot exceed 20." })
     .default(3),
+  // Each hour's weight is scaled by a random factor in [1 - fluctuation, 1 + fluctuation].
+  fluctuation: z.number()
+    .min(0, { message: "fluctuation must be at least 0." })
+    .lt(1, { message: "fluctuation must be less than 1." })
+    .default(0.2),
   // custom only: relative traffic of hour 0, 1, ...; missing hours get 0. The daily
   // total is still expectedExternalDailyRequestCount. Its pairing with shape is checked
   // in SimConfigLoadSimulationValidator.
