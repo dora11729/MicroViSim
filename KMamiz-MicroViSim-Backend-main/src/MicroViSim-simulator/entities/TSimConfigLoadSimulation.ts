@@ -13,10 +13,12 @@ import { z } from "zod";
 /**** Simulation configuration YAML format validation ****/
 /** Load simulation **/
 
+const HOURS_PER_DAY = 24;
+
 // The recurring, every-day shape of the incoming traffic.
 const trafficPatternSchema = z.object({
-  shape: z.enum(["flat", "unimodal", "bimodal"], {
-    message: "shape must be one of 'flat', 'unimodal' or 'bimodal'.",
+  shape: z.enum(["flat", "unimodal", "bimodal", "custom"], {
+    message: "shape must be one of 'flat', 'unimodal', 'bimodal' or 'custom'.",
   }).default("flat"),
   peakHour: z.number()
     .int({ message: "peakHour must be an integer." })
@@ -32,6 +34,13 @@ const trafficPatternSchema = z.object({
     .min(1, { message: "peakRatio must be at least 1." })
     .max(20, { message: "peakRatio cannot exceed 20." })
     .default(3),
+  // custom only: relative traffic of hour 0, 1, ...; missing hours get 0. The daily
+  // total is still expectedExternalDailyRequestCount. Its pairing with shape is checked
+  // in SimConfigLoadSimulationValidator.
+  hourlyMultipliers: z.array(
+    z.number().min(0, { message: "hourlyMultipliers values must be at least 0." })
+  ).max(HOURS_PER_DAY, { message: `hourlyMultipliers cannot have more than ${HOURS_PER_DAY} values.` })
+    .optional(),
 }).strict();
 
 // Load simulation basic config

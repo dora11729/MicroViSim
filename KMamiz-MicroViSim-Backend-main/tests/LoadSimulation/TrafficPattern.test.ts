@@ -1,10 +1,15 @@
 import LoadSimulationHandler from "../../src/MicroViSim-simulator/classes/LoadSimulation/LoadSimulationHandler";
 import SimulationRandom from "../../src/MicroViSim-simulator/classes/SimulationRandom";
-import { TSimulationTrafficPattern } from "../../src/MicroViSim-simulator/entities/TSimConfigLoadSimulation";
+import {
+  loadSimulationConfigSchema,
+  TSimulationTrafficPattern,
+} from "../../src/MicroViSim-simulator/entities/TSimConfigLoadSimulation";
 
 const Seed = 1234;
 const SlotsPerDay = 24;
 const DailyRequestCount = 240000;
+
+const accepts = (trafficPattern: object) => loadSimulationConfigSchema.safeParse({ trafficPattern }).success;
 
 function mockPattern(pattern: Partial<TSimulationTrafficPattern> = {}): TSimulationTrafficPattern {
   return { shape: "flat", peakHour: 14, secondPeakHour: 19, peakRatio: 3, ...pattern };
@@ -107,5 +112,27 @@ describe("LoadSimulationHandler traffic pattern", () => {
     );
     expect(day[11]).toBeGreaterThan(day[13]);
     expect(day[16]).toBeGreaterThan(day[13]);
+  });
+
+  it("follows custom hourly multipliers and leaves the other hours empty", () => {
+    const [day] = distribute(mockPattern({ shape: "custom", hourlyMultipliers: [2, 1, 0, 1] }));
+    // 2x either side of ±10% jitter.
+    expect(day[0] / day[1]).toBeGreaterThan(1.6);
+    expect(day[0] / day[1]).toBeLessThan(2.5);
+    expect(day[2]).toBe(0);
+    expect(day.slice(4)).toEqual(new Array(SlotsPerDay - 4).fill(0));
+    expect(day.reduce((a, b) => a + b, 0)).toBe(DailyRequestCount);
+  });
+});
+
+describe("trafficPattern schema", () => {
+  it("accepts custom multipliers for up to a whole day", () => {
+    expect(accepts({ shape: "custom", hourlyMultipliers: [1, 0.5] })).toBe(true);
+    expect(accepts({ shape: "custom", hourlyMultipliers: new Array(24).fill(1) })).toBe(true);
+  });
+
+  it("rejects custom multipliers that are negative or too many", () => {
+    expect(accepts({ shape: "custom", hourlyMultipliers: [1, -1] })).toBe(false);
+    expect(accepts({ shape: "custom", hourlyMultipliers: new Array(25).fill(1) })).toBe(false);
   });
 });

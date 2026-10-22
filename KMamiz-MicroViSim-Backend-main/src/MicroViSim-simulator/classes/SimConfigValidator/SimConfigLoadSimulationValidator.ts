@@ -1,7 +1,7 @@
 import { TServiceInfoDefinitionContext } from "../../entities/TServiceInfoDefinitionContext";
 import SimulatorUtils from "../SimulatorUtils";
 import { TSimulationFaults } from "../../entities/TSimConfigFaultInjection";
-import { TLoadSimulationSettings } from "../../entities/TSimConfigLoadSimulation";
+import { TLoadSimulationSettings, TSimulationTrafficPattern } from "../../entities/TSimConfigLoadSimulation";
 import { TSimConfigValidationError } from "../../entities/TSimConfigValidationError";
 
 
@@ -12,6 +12,9 @@ export default class SimConfigLoadSimulationValidator {
     serviceInfoDefinitionContext: TServiceInfoDefinitionContext,
   ): TSimConfigValidationError[] {
 
+    // Needs only the config, so it is reported alongside the metric errors.
+    const trafficPatternErrors = this.validateTrafficPattern(loadSimulationSettings.config.trafficPattern);
+
     // validate metrics
     const serviceMetricErrors = this.validateServiceMetrics(
       loadSimulationSettings,
@@ -20,6 +23,7 @@ export default class SimConfigLoadSimulationValidator {
     const endpointMetricErrors = this.validateEndpointMetrics(
       loadSimulationSettings, serviceInfoDefinitionContext);
     const metricErrors = [
+      ...trafficPatternErrors,
       ...serviceMetricErrors,
       ...endpointMetricErrors,
     ];
@@ -35,6 +39,22 @@ export default class SimConfigLoadSimulationValidator {
 
     // If no errors found, return an empty array.
     return [];
+  }
+
+  // hourlyMultipliers belongs to shape "custom" only, and must leave some hour to put requests in.
+  private validateTrafficPattern(trafficPattern: TSimulationTrafficPattern): TSimConfigValidationError[] {
+    const errorLocation = "loadSimulation.config.trafficPattern.hourlyMultipliers";
+    const multipliers = trafficPattern.hourlyMultipliers;
+    if (trafficPattern.shape !== "custom") {
+      return multipliers === undefined ? [] : [{
+        errorLocation,
+        message: "hourlyMultipliers is only used when shape is 'custom'.",
+      }];
+    }
+    return multipliers?.some(m => m > 0) ? [] : [{
+      errorLocation,
+      message: "shape 'custom' needs hourlyMultipliers with at least one value above 0.",
+    }];
   }
 
   // check each service in serviceMetrics is defined in servicesInfo

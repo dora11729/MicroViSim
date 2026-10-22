@@ -313,7 +313,7 @@ export default class LoadSimulationHandler {
 
     /*
       Generate random weights for distributing request counts across all time slots  
-      with flat: ±20%, unimodal and bimodal: ±10% fluctuation.
+      with flat: ±20%, unimodal, bimodal and custom: ±10% fluctuation.
       (TODO:後續可找幾篇論文研究真實流量波動範圍，然後調整此設計！！)
     */
     const FLAT_JITTER = 0.2;
@@ -357,6 +357,7 @@ export default class LoadSimulationHandler {
     busiest peakRatio.
       unimodal => one broad peak at peakHour, bottoming out twelve hours later
       bimodal => two peaks (peakHour and secondPeakHour), e.g. a commute pattern
+      custom => hourlyMultipliers as given, 0 for the hours it leaves out
   */
   private buildShapeWeights(
     timeSlotCountPerDay: number,
@@ -366,6 +367,11 @@ export default class LoadSimulationHandler {
 
     if (shape === "flat") {
       return new Array(timeSlotCountPerDay).fill(1);
+    }
+
+    if (shape === "custom") {
+      const multipliers = trafficPattern.hourlyMultipliers ?? [];
+      return Array.from({ length: timeSlotCountPerDay }, (_, slot) => multipliers[slot] ?? 0);
     }
 
     if (shape === "bimodal") {
