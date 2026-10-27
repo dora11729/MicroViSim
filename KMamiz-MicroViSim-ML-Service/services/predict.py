@@ -12,12 +12,14 @@ router = APIRouter()
 class PredictRequest(BaseModel):
     service: str
     model: Literal["arima", "bilstm", "gru"]
-    # Observed percent-of-day share for every slot of the simulation, in order.
+    # Observed percent-of-day share for every hour of the simulation, in order.
     shares: list[float]
+    # What the one-minute model is fed for minutes 2..60 of the hour it forecasts.
+    multiStep: Literal["recursive", "linearInput"] = "recursive"
 
 
 class PredictResponse(BaseModel):
-    # predictions[t] is built from shares[0..t-1] only; None when history is too short.
+    # predictions[t] is built from shares[0..t-1] only; None for hour 0.
     predictions: list[float | None]
 
 
@@ -34,7 +36,7 @@ def predict(req: PredictRequest):
         raise HTTPException(status_code=404,
                             detail=f"No trained {req.model} model for service '{req.service}'.")
     try:
-        predictions = forecasters.predict(req.model, directory, req.shares)
+        predictions = forecasters.predict(req.model, directory, req.shares, req.multiStep)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
     return PredictResponse(predictions=predictions)

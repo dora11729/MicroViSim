@@ -1,4 +1,4 @@
-import MLModelClient, { MLModelType, TMLTrainingService } from "./MLModelClient";
+import MLModelClient, { MLModelType, TMLTrainingService, TMultiStepForecast } from "./MLModelClient";
 import PredictedLoadPropagator, { TPredictedServiceLoad, TServiceTrafficProfile } from "./PredictedLoadPropagator";
 import SimulatorUtils from "../SimulatorUtils";
 import {
@@ -40,6 +40,7 @@ export default class MLScalingHandler {
     dependOnMap: TDependOnMapWithCallProbability;
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>;
     sortedTimeSlotKeys: string[];
+    multiStepForecast: TMultiStepForecast;
   }): Promise<Map<string, Map<string, TPredictedServiceLoad>>> {
     const modelServices = this.modelServices(input.serviceMetrics);
     if (modelServices.size === 0) return new Map();
@@ -52,7 +53,7 @@ export default class MLScalingHandler {
       await this.mlClient.train(training);
       for (const { service, model, dailyRequestCount } of training) {
         const shares = this.observedShares(service, profile, input.sortedTimeSlotKeys, input.metricsPerTimeSlotMap);
-        const predicted = await this.mlClient.predictShares(service, model, shares);
+        const predicted = await this.mlClient.predictShares(service, model, shares, input.multiStepForecast);
         ownPredictions.set(service, predicted && predicted.map(
           share => share === null ? null : this.shareToRPS(share, dailyRequestCount)
         ));

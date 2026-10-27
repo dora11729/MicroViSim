@@ -103,9 +103,12 @@ async function scale(
   dailyRequestCount = 0
 ): Promise<number[]> {
   const { propagationResults, metricsPerTimeSlotMap } = mockTimeline(rpsPerSlot, baseReplicaCount);
-  const settings: Pick<TLoadSimulationSettings, "serviceMetrics" | "endpointMetrics"> = {
+  const settings: Pick<TLoadSimulationSettings, "serviceMetrics" | "endpointMetrics"> & {
+    config: Pick<TLoadSimulationSettings["config"], "multiStepForecast">;
+  } = {
     serviceMetrics: mockServiceMetrics(scaling),
     endpointMetrics: [mockEndpointMetric(dailyRequestCount)],
+    config: { multiStepForecast: "recursive" },
   };
   await (LoadSimulationHandler.getInstance() as any).applyAutoScalingForTimeSlot(
     settings,

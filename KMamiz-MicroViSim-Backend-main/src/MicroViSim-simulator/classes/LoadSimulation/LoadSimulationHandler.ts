@@ -477,6 +477,7 @@ export default class LoadSimulationHandler {
       dependOnMap: dependOnMapWithCallProbability,
       metricsPerTimeSlotMap,
       sortedTimeSlotKeys,
+      multiStepForecast: loadSimulationSettings.config.multiStepForecast,
     });
 
     // ns: namespace

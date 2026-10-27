@@ -99,6 +99,7 @@ describe("MLScalingHandler", () => {
       dependOnMap: new Map(),
       metricsPerTimeSlotMap: mockExternalArrivals([{}, {}, {}]),
       sortedTimeSlotKeys: Slots,
+      multiStepForecast: "recursive",
     });
     expect(train).not.toHaveBeenCalled();
     expect(table.size).toBe(0);
@@ -114,9 +115,10 @@ describe("MLScalingHandler", () => {
       dependOnMap: new Map(),
       metricsPerTimeSlotMap: mockExternalArrivals([{ [GatewayApi]: 3600 }, { [GatewayApi]: 7200 }, {}]),
       sortedTimeSlotKeys: Slots,
+      multiStepForecast: "recursive",
     });
 
-    expect(predictShares).toHaveBeenCalledWith(Gateway, "bilstm", [1, 2, 0]);
+    expect(predictShares).toHaveBeenCalledWith(Gateway, "bilstm", [1, 2, 0], "recursive");
     expect(table.get(Slots[1])!.get(Gateway)).toEqual({ status: "ok", rps: 10 });
     expect(table.get(Slots[2])!.get(Gateway)).toEqual({ status: "ok", rps: 20 });
   });

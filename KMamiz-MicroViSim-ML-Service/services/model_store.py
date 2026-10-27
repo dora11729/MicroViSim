@@ -12,7 +12,7 @@ ROOT = Path(__file__).parent.parent
 MODEL_DIR = ROOT / "models"              # mounted as a volume in deployment
 FINETUNE_DIR = MODEL_DIR / "finetuned"
 DATASET_DIR = MODEL_DIR / "dataset"      # user uploads, not consumed yet
-NASA_DATASET = ROOT / "datasets" / "nasa1995_july_grouped.csv"
+NASA_DATASET = ROOT / "datasets" / "nasa1995_july_grouped_1min.csv"
 MANIFEST = FINETUNE_DIR / "manifest.json"
 
 FINETUNE_DIR.mkdir(parents=True, exist_ok=True)

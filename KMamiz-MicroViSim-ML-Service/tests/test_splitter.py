@@ -9,7 +9,7 @@ CompleteDays = 27
 
 
 def average_daily(result, source=Source):
-    days = source.valid.sum() / 24
+    days = source.valid.sum() / source.bins_per_day
     return np.nansum(result.counts[source.valid], axis=0) / days
 
 
@@ -19,7 +19,7 @@ def mock_source(k_count: int, hours: int = 48, seed: int = 0) -> SourceTraffic:
     bin_start = pd.Series([f"1995-07-{1 + h // 24:02d}T{h % 24:02d}:00:00-04:00"
                            for h in range(hours)])
     return SourceTraffic([f"g{k}" for k in range(k_count)], bin_start,
-                         np.ones(hours, bool), counts)
+                         np.ones(hours, bool), counts, 24)
 
 
 def test_assigns_every_group_to_exactly_one_target():
@@ -44,7 +44,7 @@ def test_mixes_when_targets_outnumber_groups():
     np.testing.assert_allclose(average_daily(result), daily, rtol=1e-6)
 
 
-def test_keeps_the_hourly_total_proportional_when_mixing():
+def test_keeps_each_bin_total_proportional_when_mixing():
     result = split(Source, [1000 * (m + 1) for m in range(9)])
     valid = Source.valid
     np.testing.assert_allclose(result.counts[valid].sum(axis=1),
@@ -74,14 +74,18 @@ def test_rejects_a_non_positive_daily_total():
     raise AssertionError("expected ValueError")
 
 
+def test_reads_one_minute_bins():
+    assert Source.bins_per_day == 1440
+
+
 def test_keeps_complete_days_only():
-    shares = daily_share_series(Source.bin_start, Source.valid, Source.counts[:, 0])
-    assert len(shares) == CompleteDays * 24
-    np.testing.assert_allclose(shares.reshape(CompleteDays, 24).sum(axis=1), 100)
+    shares = daily_share_series(Source.bin_start, Source.valid, Source.counts[:, 0], Source.bins_per_day)
+    assert len(shares) == CompleteDays * Source.bins_per_day
+    np.testing.assert_allclose(shares.reshape(CompleteDays, -1).sum(axis=1), 100)
 
 
-def test_drops_a_day_with_a_missing_hour():
+def test_drops_a_day_with_a_missing_bin():
     valid = Source.valid.copy()
-    valid[30] = False   # 1995-07-02 06:00
-    shares = daily_share_series(Source.bin_start, valid, Source.counts[:, 0])
-    assert len(shares) == (CompleteDays - 1) * 24
+    valid[1440 + 360] = False   # 1995-07-02 06:00
+    shares = daily_share_series(Source.bin_start, valid, Source.counts[:, 0], Source.bins_per_day)
+    assert len(shares) == (CompleteDays - 1) * Source.bins_per_day

@@ -11,7 +11,8 @@ hourly_share_of_day.py.
   to pi_m and columns to s_k; W = A / s_k and X_m(t) = alpha * sum_k W_mk * request_k(t).
 
 alpha makes the average daily total equal sum D, so each target's average daily
-total equals its D_m. Missing hours stay NaN.
+total equals its D_m. Missing bins stay NaN. Bins may be any fixed width (an hour or a
+minute); the width is read from the source's timestamps.
 """
 
 from __future__ import annotations
@@ -26,21 +27,22 @@ import pandas as pd
 
 ENUM_LIMIT = 10 ** 6
 EPS = 1e-12
-HOURS_PER_DAY = 24
+SECONDS_PER_DAY = 24 * 60 * 60
 
 
 @dataclass
 class SourceTraffic:
     groups: list[str]
     bin_start: pd.Series
-    valid: np.ndarray           # (hours,) False where missing = 1
-    counts: np.ndarray          # (hours, K), NaN on missing hours
+    valid: np.ndarray           # (bins,) False where missing = 1
+    counts: np.ndarray          # (bins, K), NaN on missing bins
+    bins_per_day: int
 
 
 @dataclass
 class SplitResult:
     method: int                 # 1 = assign groups, 2 = mixing matrix
-    counts: np.ndarray          # (hours, M)
+    counts: np.ndarray          # (bins, M)
     weights: np.ndarray         # (M, K)
     alpha: float
     info: dict
@@ -53,7 +55,9 @@ def load_source(path: Path) -> SourceTraffic:
     valid = (df["missing"] == 0).to_numpy()
     counts = df[[f"{g}_count" for g in groups]].to_numpy(float)
     counts[~valid] = np.nan
-    return SourceTraffic(groups, df["bin_start"], valid, counts)
+    times = pd.to_datetime(df["bin_start"].iloc[:2])
+    bins_per_day = round(SECONDS_PER_DAY / (times.iloc[1] - times.iloc[0]).total_seconds())
+    return SourceTraffic(groups, df["bin_start"], valid, counts, bins_per_day)
 
 
 # ---------------------------------------------------------------- method 1 --
@@ -187,11 +191,11 @@ def split(source: SourceTraffic, daily: list[float], seed: int = 42, c: float = 
     s = np.nansum(counts[valid], axis=0) / np.nansum(counts[valid])
     if (s == 0).any():
         empty = [g for g, sk in zip(source.groups, s) if sk == 0]
-        raise ValueError(f"source groups with no requests in valid hours: {empty}")
+        raise ValueError(f"source groups with no requests in valid bins: {empty}")
 
     pi = daily_arr / daily_arr.sum()
-    hourly_total = counts.sum(axis=1)
-    alpha = float(daily_arr.sum() / (np.nanmean(hourly_total[valid]) * HOURS_PER_DAY))
+    bin_total = counts.sum(axis=1)
+    alpha = float(daily_arr.sum() / (np.nanmean(bin_total[valid]) * source.bins_per_day))
 
     if len(source.groups) >= len(daily_arr):
         method, (weights, info) = 1, method1(s, pi)
@@ -201,18 +205,19 @@ def split(source: SourceTraffic, daily: list[float], seed: int = 42, c: float = 
     return SplitResult(method, alpha * counts @ weights.T, weights, alpha, info)
 
 
-def daily_share_series(bin_start: pd.Series, valid: np.ndarray, counts: np.ndarray) -> np.ndarray:
-    """Percent of the calendar day's traffic, per hour, over complete days only.
+def daily_share_series(bin_start: pd.Series, valid: np.ndarray, counts: np.ndarray,
+                       bins_per_day: int) -> np.ndarray:
+    """Percent of the calendar day's traffic, per bin, over complete days only.
 
-    A day is complete when it has 24 valid hourly bins; anything else (e.g. a log that
-    stops mid-day) would make the percentages relative to a partial day.
+    A day is complete when all its bins are valid; anything else (e.g. a log that stops
+    mid-day) would make the percentages relative to a partial day.
 
     Any constant factor on counts (alpha, and beta in method 1) cancels out here, so the
     shares depend only on which source groups a target is made of and their weights.
     """
     date = bin_start.str[:10].to_numpy()   # the log's local calendar day
     frame = pd.DataFrame({"date": date, "valid": valid, "count": counts})
-    complete = frame.groupby("date")["valid"].transform("sum") == HOURS_PER_DAY
+    complete = frame.groupby("date")["valid"].transform("sum") == bins_per_day
     frame = frame[complete]
     daily = frame.groupby("date")["count"].transform("sum")
     return (frame["count"] / daily * 100).to_numpy(float)

@@ -86,7 +86,8 @@ def train(req: TrainRequest):
 
     results, failed = {}, {}
     for m, spec in enumerate(services):
-        series = daily_share_series(source.bin_start, source.valid, result.counts[:, m])
+        series = daily_share_series(source.bin_start, source.valid, result.counts[:, m],
+                                    source.bins_per_day)
         try:
             meta = forecasters.train(spec.model, series, service_dir(spec.service))
             results[spec.service] = meta
