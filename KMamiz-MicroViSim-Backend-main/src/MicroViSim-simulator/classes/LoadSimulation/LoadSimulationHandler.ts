@@ -20,8 +20,10 @@ import LoadSimulationPropagator from "./LoadSimulationPropagator";
 import FaultInjector from "./FaultInjector";
 import OverloadErrorRateAndLatencyEstimator from "./OverloadErrorRateAndLatencyEstimator";
 import SimulatorUtils from "../SimulatorUtils";
-import MLScalingHandler from "./MLScalingHandler";
+import MLScalingHandler, { TPredictedLoadsByStrategy } from "./MLScalingHandler";
 import { TMLFallbackReason } from "./PredictedLoadPropagator";
+import PredictionComparisonBuilder from "./PredictionComparisonBuilder";
+import { TPredictionComparison } from "../../entities/TPredictionComparison";
 import PredictionAccuracyTracker from "./PredictionAccuracyTracker";
 import SimulationRandom from "../SimulationRandom";
 
@@ -57,6 +59,7 @@ export default class LoadSimulationHandler {
     realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]>;
     realtimeReplicaCountTimeline: Map<string, TReplicaCount[]>;
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>
+    predictionComparison: TPredictionComparison;
   }> {
 
     // Reseed before anything draws, so the whole run replays from this one number.
@@ -94,7 +97,7 @@ export default class LoadSimulationHandler {
     );
 
     // Apply auto-scaling decisions based on basic error rate propagation
-    await this.applyAutoScalingForTimeSlot(
+    const predictedLoads = await this.applyAutoScalingForTimeSlot(
       loadSimulationSettings,
       dependOnMapWithCallProbability,
       propagationResultsWithBasicError,
@@ -129,6 +132,15 @@ export default class LoadSimulationHandler {
       true,
     );
 
+    const predictionComparison = new PredictionComparisonBuilder().build({
+      sortedTimeSlotKeys: this.sortedTimeSlotKeys(metricsPerTimeSlotMap),
+      simulateDate,
+      modelServices: this.mlScalingHandler.modelServices(loadSimulationSettings.serviceMetrics),
+      predictedLoads,
+      serviceRequestCounts: this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithOverloadError),
+      configuredMethod: loadSimulationSettings.config.multiStepForecast,
+    });
+
     const realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]> = this.dataGenerator.generateRealtimeDataFromSimulationResults(
       EndpointRealTimeBaseDatas,
       propagationResultsWithOverloadError,
@@ -159,6 +171,7 @@ export default class LoadSimulationHandler {
       realtimeCombinedDataPerTimeSlotMap: realtimeCombinedDataPerTimeSlotMap,
       realtimeReplicaCountTimeline: realtimeReplicaCountTimeline,
       metricsPerTimeSlotMap: metricsPerTimeSlotMap,
+      predictionComparison,
     };
   }
 
@@ -457,28 +470,28 @@ export default class LoadSimulationHandler {
 
       no model => reactive HPA, the naive "next RPS = last RPS"
       model    => predicted RPS: the service's own share-of-day model plus whatever
-                  predicted load its callers pass down (MLScalingHandler)
+                  predicted load its callers pass down (MLScalingHandler), by the
+                  configured multiStepForecast
+    Returns every strategy's predictions, for comparing them after the run.
   */
   private async applyAutoScalingForTimeSlot(
     loadSimulationSettings: TLoadSimulationSettings,
     dependOnMapWithCallProbability: TDependOnMapWithCallProbability,
     propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>,
-  ) {
+  ): Promise<TPredictedLoadsByStrategy> {
     const serviceMetrics = loadSimulationSettings.serviceMetrics;
     const serviceReceivedRequestCount = this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithBasicError);
-    const sortedTimeSlotKeys = Array.from(metricsPerTimeSlotMap.keys()).sort(
-      (a, b) => this.timeSlotKeyToMinutes(a) - this.timeSlotKeyToMinutes(b)
-    );
+    const sortedTimeSlotKeys = this.sortedTimeSlotKeys(metricsPerTimeSlotMap);
 
-    const predictedLoads = await this.mlScalingHandler.planPredictedLoads({
+    const predictedLoadsByStrategy = await this.mlScalingHandler.planPredictedLoads({
       serviceMetrics,
       endpointMetrics: loadSimulationSettings.endpointMetrics,
       dependOnMap: dependOnMapWithCallProbability,
       metricsPerTimeSlotMap,
       sortedTimeSlotKeys,
-      multiStepForecast: loadSimulationSettings.config.multiStepForecast,
     });
+    const predictedLoads = predictedLoadsByStrategy.get(loadSimulationSettings.config.multiStepForecast) ?? new Map();
 
     // ns: namespace
     const dataset = [];
@@ -597,6 +610,7 @@ export default class LoadSimulationHandler {
     accuracyTracker.report();
     this.reportMLFallbacks(fallbackCounts);
     console.dir(dataset, { depth: null, maxArrayLength: null });
+    return predictedLoadsByStrategy;
   }
 
   private recordFallback(
@@ -695,6 +709,12 @@ export default class LoadSimulationHandler {
     }
 
     return currentReplicas;
+  }
+
+  private sortedTimeSlotKeys(metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>): string[] {
+    return Array.from(metricsPerTimeSlotMap.keys()).sort(
+      (a, b) => this.timeSlotKeyToMinutes(a) - this.timeSlotKeyToMinutes(b)
+    );
   }
 
   private timeSlotKeyToMinutes(timeSlotKey: string): number {

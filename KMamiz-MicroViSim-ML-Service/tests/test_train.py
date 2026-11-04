@@ -22,8 +22,9 @@ def trained(tmp_path, monkeypatch):
         if service in calls["fail"]:
             raise RuntimeError("boom")
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / forecasters.META_FILE).write_text(json.dumps({"model": model_type}))
-        (directory / forecasters.ARTIFACT_FILE[model_type]).write_text("model")
+        for path in forecasters.artifact_paths(model_type, directory):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"model": model_type}))
         calls["series"][service] = series.copy()
         return {"model": model_type}
 

@@ -2,6 +2,7 @@ import MLModelClient, { MLModelType, TMLTrainingService, TMultiStepForecast } fr
 import PredictedLoadPropagator, { TPredictedServiceLoad, TServiceTrafficProfile } from "./PredictedLoadPropagator";
 import SimulatorUtils from "../SimulatorUtils";
 import {
+  multiStepForecasts,
   TSimulationEndpointMetric,
   TSimulationNamespaceServiceMetrics,
 } from "../../entities/TSimConfigLoadSimulation";
@@ -12,6 +13,9 @@ import {
 
 const SECONDS_PER_HOUR = 3600;
 const PERCENT = 100;
+
+// strategy -> slot -> uniqueServiceName -> predicted load
+export type TPredictedLoadsByStrategy = Map<TMultiStepForecast, Map<string, Map<string, TPredictedServiceLoad>>>;
 
 /*
   Models predict each hour's share of the day's traffic (percent), per service, so a
@@ -30,9 +34,10 @@ export default class MLScalingHandler {
   }
 
   /*
-    Predicted RPS per slot for every service whose autoScaling names a model. Nothing
-    here depends on scaling decisions, so the whole table is built before the scaling
-    loop runs. Throws if training fails.
+    Predicted RPS per slot for every service whose autoScaling names a model, by every
+    multi-step strategy so a run can compare them. Nothing here depends on scaling
+    decisions, so the whole table is built before the scaling loop runs. Throws if
+    training fails.
   */
   async planPredictedLoads(input: {
     serviceMetrics: TSimulationNamespaceServiceMetrics[];
@@ -40,34 +45,39 @@ export default class MLScalingHandler {
     dependOnMap: TDependOnMapWithCallProbability;
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>;
     sortedTimeSlotKeys: string[];
-    multiStepForecast: TMultiStepForecast;
-  }): Promise<Map<string, Map<string, TPredictedServiceLoad>>> {
+  }): Promise<TPredictedLoadsByStrategy> {
     const modelServices = this.modelServices(input.serviceMetrics);
     if (modelServices.size === 0) return new Map();
 
     const profile = this.buildTrafficProfile(input.endpointMetrics);
     const training = this.trainingServices(profile, modelServices);
-    const ownPredictions = new Map<string, (number | null)[] | null>();
+    // strategy -> service -> predicted external RPS per slot, or null if the ML service failed
+    const ownPredictions = new Map(multiStepForecasts.map(
+      strategy => [strategy, new Map<string, (number | null)[] | null>()]
+    ));
 
     if (training.length > 0) {
       await this.mlClient.train(training);
       for (const { service, model, dailyRequestCount } of training) {
         const shares = this.observedShares(service, profile, input.sortedTimeSlotKeys, input.metricsPerTimeSlotMap);
-        const predicted = await this.mlClient.predictShares(service, model, shares, input.multiStepForecast);
-        ownPredictions.set(service, predicted && predicted.map(
-          share => share === null ? null : this.shareToRPS(share, dailyRequestCount)
-        ));
+        const predicted = await this.mlClient.predictShares(service, model, shares, multiStepForecasts);
+        for (const strategy of multiStepForecasts) {
+          const strategyShares = predicted?.[strategy];
+          ownPredictions.get(strategy)!.set(service, strategyShares ? strategyShares.map(
+            share => share === null ? null : this.shareToRPS(share, dailyRequestCount)
+          ) : null);
+        }
       }
     }
 
-    return this.propagator.propagate({
+    return new Map(multiStepForecasts.map(strategy => [strategy, this.propagator.propagate({
       sortedTimeSlotKeys: input.sortedTimeSlotKeys,
       profile,
       dependOnMap: input.dependOnMap,
       metricsPerTimeSlotMap: input.metricsPerTimeSlotMap,
-      ownPredictions,
+      ownPredictions: ownPredictions.get(strategy)!,
       modelServices: Array.from(modelServices.keys()),
-    });
+    })]));
   }
 
   buildTrafficProfile(endpointMetrics: TSimulationEndpointMetric[]): TServiceTrafficProfile {

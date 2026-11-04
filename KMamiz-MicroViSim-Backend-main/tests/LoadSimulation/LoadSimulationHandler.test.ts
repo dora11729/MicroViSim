@@ -6,10 +6,12 @@ import {
   TEndpointPropagationStatsForOneTimeSlot,
 } from "../../src/MicroViSim-simulator/entities/TLoadSimulation";
 import {
+  multiStepForecasts,
   TLoadSimulationSettings,
   TSimulationEndpointMetric,
   TSimulationNamespaceServiceMetrics,
 } from "../../src/MicroViSim-simulator/entities/TSimConfigLoadSimulation";
+import { TMultiStepForecast } from "../../src/MicroViSim-simulator/classes/LoadSimulation/MLModelClient";
 
 const SecondsPerHour = 3600;
 const ServiceName = "order";
@@ -20,6 +22,15 @@ const UniqueServiceName = SimulatorUtils.generateUniqueServiceName(ServiceName, 
 const UniqueEndpointName = SimulatorUtils.generateUniqueEndpointName(
   ServiceName, Namespace, Version, "GET", "/orders"
 );
+
+// The same shares from every strategy, unless one is overridden.
+function sharesByStrategy(
+  shares: (number | null)[],
+  overrides: Partial<Record<TMultiStepForecast, (number | null)[]>> = {}
+): Record<TMultiStepForecast, (number | null)[]> {
+  return Object.fromEntries(multiStepForecasts.map(m => [m, overrides[m] ?? shares])) as
+    Record<TMultiStepForecast, (number | null)[]>;
+}
 
 type TScalingOptions = {
   maxScaleStep?: number;
@@ -100,7 +111,8 @@ async function scale(
   rpsPerSlot: number[],
   baseReplicaCount = 1,
   scaling?: TScalingOptions,
-  dailyRequestCount = 0
+  dailyRequestCount = 0,
+  multiStepForecast: TMultiStepForecast = "recursive"
 ): Promise<number[]> {
   const { propagationResults, metricsPerTimeSlotMap } = mockTimeline(rpsPerSlot, baseReplicaCount);
   const settings: Pick<TLoadSimulationSettings, "serviceMetrics" | "endpointMetrics"> & {
@@ -108,7 +120,7 @@ async function scale(
   } = {
     serviceMetrics: mockServiceMetrics(scaling),
     endpointMetrics: [mockEndpointMetric(dailyRequestCount)],
-    config: { multiStepForecast: "recursive" },
+    config: { multiStepForecast },
   };
   await (LoadSimulationHandler.getInstance() as any).applyAutoScalingForTimeSlot(
     settings,
@@ -159,10 +171,19 @@ describe("LoadSimulationHandler model-driven auto-scaling", () => {
 
   it("sizes each slot from the predicted load instead of the last one", async () => {
     const train = jest.spyOn(client, "train").mockResolvedValue();
-    jest.spyOn(client, "predictShares").mockResolvedValue([null, 21, 21, 21]);
+    jest.spyOn(client, "predictShares").mockResolvedValue(sharesByStrategy([null, 21, 21, 21]));
 
     expect(await scale([1, 1, 1, 1], 1, { model: "gru" }, Daily)).toEqual([1, 3, 3, 3]);
     expect(train).toHaveBeenCalledWith([{ service: UniqueServiceName, model: "gru", dailyRequestCount: Daily }]);
+  });
+
+  it("scales by the configured strategy only", async () => {
+    jest.spyOn(client, "train").mockResolvedValue();
+    jest.spyOn(client, "predictShares").mockResolvedValue(
+      sharesByStrategy([null, 1, 1, 1], { hourly: [null, 21, 21, 21] })
+    );
+    expect(await scale([1, 1, 1, 1], 1, { model: "gru" }, Daily, "recursive")).toEqual([1, 1, 1, 1]);
+    expect(await scale([1, 1, 1, 1], 1, { model: "gru" }, Daily, "hourly")).toEqual([1, 3, 3, 3]);
   });
 
   it("scales reactively when the model cannot predict", async () => {

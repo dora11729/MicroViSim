@@ -1,5 +1,7 @@
 import Config from "../../Config";
 import YAML from 'yaml';
+import { DataView } from "./DataView";
+import { TPredictionComparison } from "../entities/TPredictionComparison";
 
 export default class SimulationService {
   private static instance?: SimulationService;
@@ -12,6 +14,14 @@ export default class SimulationService {
     const res = await fetch(path);
     if (!res.ok) return null;
     return (await res.json()) as T;
+  }
+
+  // The latest run's forecasts by method; polled so a new run shows up without a reload.
+  subscribeToPredictionComparison(next: (data?: TPredictionComparison) => void) {
+    return DataView.getInstance().subscribe<TPredictionComparison>(
+      `${this.prefix}/predictions`,
+      (_, data) => next(data)
+    );
   }
 
   async retrieveDataBySimulateYaml(simConfigYAML: string) {

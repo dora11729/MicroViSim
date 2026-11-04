@@ -4,15 +4,21 @@ import SimulationConfigManager from "../classes/SimulationConfigManager";
 import ServiceOperator from "../../services/ServiceOperator";
 import ImportExportHandler from "../../services/ImportExportHandler";
 import multer from "multer";
+import { TPredictionComparison } from "../entities/TPredictionComparison";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
 export default class SimulationService extends IRequestHandler {
 
-
+  // The latest run's forecasts, by method; kept in memory only, like the run's own inputs.
+  private predictionComparison: TPredictionComparison | null = null;
 
   constructor() {
     super("simulation");
+
+    this.addRoute("get", "/predictions", async (_, res) => {
+      res.json(this.predictionComparison ?? { dates: [], methods: [], configuredMethod: "", services: [] });
+    });
 
     this.addRoute(
       "post",
@@ -96,6 +102,7 @@ export default class SimulationService extends IRequestHandler {
   ): Promise<{ status: number; message: string }> {
 
     const simulateDate = Date.now();  // The time at the start of the simulation.
+    this.predictionComparison = null;
 
     try {
       //clear all simulator data first
@@ -130,6 +137,7 @@ export default class SimulationService extends IRequestHandler {
             realtimeDataMap: simulationResult.realtimeCombinedDataPerTimeSlotMap,
             realtimeReplicaCountTimeline: simulationResult.realtimeReplicaCountTimeline,
           });
+          this.predictionComparison = simulationResult.predictionComparison ?? null;
 
           return {
             status: 201,

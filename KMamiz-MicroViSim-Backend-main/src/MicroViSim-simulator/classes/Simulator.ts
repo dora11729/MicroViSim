@@ -20,6 +20,7 @@ import { RealtimeDataList } from "../../classes/RealtimeDataList";
 
 import { CEndpointDependencies } from "../../classes/Cacheable/CEndpointDependencies";
 import Logger from "../../utils/Logger";
+import { TPredictionComparison } from "../entities/TPredictionComparison";
 
 type TBaseRealtimeData = Omit<
   TRealtimeData,
@@ -44,6 +45,7 @@ export default class Simulator {
     basicReplicaCountList: TReplicaCount[];
     realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]>;
     realtimeReplicaCountTimeline: Map<string, TReplicaCount[]>;
+    predictionComparison?: TPredictionComparison;   // only when load simulation ran
   }> {
 
 
@@ -85,6 +87,7 @@ export default class Simulator {
 
     let realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]> = new Map();
     let realtimeReplicaCountTimeline: Map<string, TReplicaCount[]> = new Map();
+    let predictionComparison: TPredictionComparison | undefined;
 
     const loadSimulationSettings = parsedConfig.loadSimulation;
 
@@ -102,6 +105,7 @@ export default class Simulator {
 
       realtimeCombinedDataPerTimeSlotMap = metricsMap.realtimeCombinedDataPerTimeSlotMap;
       realtimeReplicaCountTimeline = metricsMap.realtimeReplicaCountTimeline;
+      predictionComparison = metricsMap.predictionComparison;
     }
 
     try {
@@ -115,6 +119,7 @@ export default class Simulator {
         basicReplicaCountList,
         realtimeCombinedDataPerTimeSlotMap,
         realtimeReplicaCountTimeline,
+        predictionComparison,
       };
     } catch (err) {
       const errMsg = `${err instanceof Error ? err.message : err}`;

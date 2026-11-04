@@ -15,9 +15,14 @@ import { z } from "zod";
 
 const HOURS_PER_DAY = 24;
 
-// How the one-minute ML models forecast an hour: minutes 2..60 are fed either their own
-// predictions (recursive) or the last hour's trend line carried on (linearInput).
-export const multiStepForecasts = ["recursive", "linearInput"] as const;
+// How the one-minute ML models forecast an hour:
+// - recursive: minutes 2..60 are fed the model's own predictions
+// - linearInput: minutes 2..60 are fed the last hour's trend line carried on
+// - rectify: recursive, plus a kNN estimate of its hourly error
+// - direct: six models, each forecasting one 10-minute block's total
+// - hourly: no minutes; a model trained on hourly shares, kept as a baseline
+// Every one of them is forecast and compared in each run; this picks the one that scales.
+export const multiStepForecasts = ["recursive", "linearInput", "rectify", "direct", "hourly"] as const;
 
 // The recurring, every-day shape of the incoming traffic.
 const trafficPatternSchema = z.object({
@@ -83,7 +88,7 @@ export const loadSimulationConfigSchema = z.object({
     .optional(),
   trafficPattern: trafficPatternSchema.default({}),
   multiStepForecast: z.enum(multiStepForecasts, {
-    message: "multiStepForecast must be one of 'recursive' or 'linearInput'.",
+    message: "multiStepForecast must be one of 'recursive', 'linearInput', 'rectify', 'direct' or 'hourly'.",
   }).default("recursive"),
   // TODO: May expand with additional config options such as chaosMonkeyEnabled, errorRateAmplificationFactor, etc^_^.
 }).strict().default({

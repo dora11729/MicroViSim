@@ -40,27 +40,27 @@ export default class MLModelClient {
   }
 
   /*
-    Next-hour percent-of-day share for every hour. predictions[t] is computed from
-    shares[0..t-1] only; null where history is too short. Returns null when the ML
-    service fails, so the caller can fall back for the whole run.
+    Next-hour percent-of-day share for every hour, by each strategy. predictions[t] is
+    computed from shares[0..t-1] only; null where history is too short. Returns null when
+    the ML service fails, so the caller can fall back for the whole run.
   */
   async predictShares(
     service: string,
     model: MLModelType,
     shares: number[],
-    multiStep: TMultiStepForecast
-  ): Promise<(number | null)[] | null> {
+    multiSteps: readonly TMultiStepForecast[]
+  ): Promise<Record<TMultiStepForecast, (number | null)[]> | null> {
     try {
       const res = await fetch(`${this.baseUrl}/predict`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ service, model, shares, multiStep }),
+        body: JSON.stringify({ service, model, shares, multiSteps }),
       });
       if (!res.ok) {
         console.error(`[MLModelClient] predict failed: ${model} for ${service} returned HTTP ${res.status}`);
         return null;
       }
-      return ((await res.json()) as { predictions: (number | null)[] }).predictions;
+      return ((await res.json()) as { predictions: Record<TMultiStepForecast, (number | null)[]> }).predictions;
     } catch (e) {
       console.error("[MLModelClient] predict failed:", e);
       return null;

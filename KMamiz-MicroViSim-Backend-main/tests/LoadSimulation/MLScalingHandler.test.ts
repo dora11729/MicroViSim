@@ -3,6 +3,7 @@ import MLScalingHandler from "../../src/MicroViSim-simulator/classes/LoadSimulat
 import SimulatorUtils from "../../src/MicroViSim-simulator/classes/SimulatorUtils";
 import { TCMetricsPerTimeSlot } from "../../src/MicroViSim-simulator/entities/TLoadSimulation";
 import {
+  multiStepForecasts,
   TSimulationEndpointMetric,
   TSimulationNamespaceServiceMetrics,
 } from "../../src/MicroViSim-simulator/entities/TSimConfigLoadSimulation";
@@ -99,15 +100,17 @@ describe("MLScalingHandler", () => {
       dependOnMap: new Map(),
       metricsPerTimeSlotMap: mockExternalArrivals([{}, {}, {}]),
       sortedTimeSlotKeys: Slots,
-      multiStepForecast: "recursive",
     });
     expect(train).not.toHaveBeenCalled();
     expect(table.size).toBe(0);
   });
 
-  it("predicts each trained service from its observed shares", async () => {
+  it("predicts each trained service from its observed shares, by every strategy", async () => {
     jest.spyOn(client, "train").mockResolvedValue();
-    const predictShares = jest.spyOn(client, "predictShares").mockResolvedValue([null, 10, 20]);
+    const predictShares = jest.spyOn(client, "predictShares").mockResolvedValue({
+      recursive: [null, 10, 20], linearInput: [null, 1, 2], rectify: [null, 3, 4], direct: [null, 5, 6],
+      hourly: [null, null, 7],
+    });
 
     const table = await handler.planPredictedLoads({
       serviceMetrics: mockServiceMetrics({ [Gateway]: "bilstm" }),
@@ -115,11 +118,13 @@ describe("MLScalingHandler", () => {
       dependOnMap: new Map(),
       metricsPerTimeSlotMap: mockExternalArrivals([{ [GatewayApi]: 3600 }, { [GatewayApi]: 7200 }, {}]),
       sortedTimeSlotKeys: Slots,
-      multiStepForecast: "recursive",
     });
 
-    expect(predictShares).toHaveBeenCalledWith(Gateway, "bilstm", [1, 2, 0], "recursive");
-    expect(table.get(Slots[1])!.get(Gateway)).toEqual({ status: "ok", rps: 10 });
-    expect(table.get(Slots[2])!.get(Gateway)).toEqual({ status: "ok", rps: 20 });
+    expect(predictShares).toHaveBeenCalledWith(Gateway, "bilstm", [1, 2, 0], multiStepForecasts);
+    expect(Array.from(table.keys())).toEqual(multiStepForecasts);
+    expect(table.get("recursive")!.get(Slots[2])!.get(Gateway)).toEqual({ status: "ok", rps: 20 });
+    expect(table.get("direct")!.get(Slots[1])!.get(Gateway)).toEqual({ status: "ok", rps: 5 });
+    expect(table.get("hourly")!.get(Slots[1])!.get(Gateway)).toEqual({ status: "fallback", reason: "insufficientHistory" });
+    expect(table.get("hourly")!.get(Slots[2])!.get(Gateway)).toEqual({ status: "ok", rps: 7 });
   });
 });

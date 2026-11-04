@@ -21,6 +21,9 @@ import {
 import GraphService from "../services/GraphService";
 import { TServiceStatistics } from "../entities/TStatistics";
 import ServiceStatisticsTable from '../components/ServiceStatisticsTable';
+import PredictionComparison from "../components/PredictionComparison";
+import SimulationService from "../services/SimulationService";
+import { TPredictionComparison } from "../entities/TPredictionComparison";
 
 const useStyles = makeStyles(() => ({
   root: {
@@ -52,6 +55,7 @@ export default function Metrics() {
   const [mappedHistoricalData, setMappedHistoricalData] = useState<TLineChartData>();
   const [statistics, setStatistics] = useState<TServiceStatistics[]>([]);
   const [downloading, setDownloading] = useState(false);
+  const [predictionComparison, setPredictionComparison] = useState<TPredictionComparison>();
 
   useEffect(() => {
     const unsubscribe = [
@@ -70,6 +74,12 @@ export default function Metrics() {
     ];
     return () => { unsubscribeStatistics.forEach((uns) => uns()); };
   }, [timeOffset]);
+
+  useEffect(() => {
+    if (!Config.backendConfig.SimulatorMode) return;
+    const unsubscribe = SimulationService.getInstance().subscribeToPredictionComparison(setPredictionComparison);
+    return () => { unsubscribe(); };
+  }, []);
 
   const areaCharts: {
     name: string;
@@ -181,6 +191,11 @@ export default function Metrics() {
             </Grid>
           ))
           : null}
+        {predictionComparison && predictionComparison.services.length > 0 && (
+          <Grid item xs={12} padding={1}>
+            <PredictionComparison comparison={predictionComparison} />
+          </Grid>
+        )}
         <Grid item xs={12} padding={1}>
           <ServiceStatisticsTable servicesStatistics={statistics} />
         </Grid>
