@@ -22,6 +22,10 @@ import { isRunning, TSimulationJobStatus } from "../../entities/TSimulationJob";
 
 const SwalHandler = withReactContent(Swal);
 const STATUS_POLL_MS = 1500;
+// The YAML of the last successful run, shown when the page opens.
+const SAVED_YAML_KEY = 'simulatorYaml';
+// The YAML of the run in progress, so a reload shows what is running, not the last success.
+const RUNNING_YAML_KEY = 'simulatorRunningYaml';
 const splitErrorLines = (message: string) =>
   message.split('\n---\n').map(line => line.trim()).filter(line => line.length > 0);
 
@@ -101,9 +105,16 @@ export default function SimulatorHome() {
   // The latest simulation run, which may have been started from another tab or before a reload.
   const [jobStatus, setJobStatus] = useState<TSimulationJobStatus | null>(null);
   const jobRunning = isRunning(jobStatus);
-  const busy = loading || jobRunning;
+  // Set from a started run until its own status arrives, so an older status, e.g. the
+  // last run's, is never taken for it.
+  const awaitingRun = useRef<{ previousStartedAt: number | null } | null>(null);
+  const [awaiting, setAwaiting] = useState(false);
+  // False until the first status check answers: until then a run may be going unseen.
+  const [statusChecked, setStatusChecked] = useState(false);
+  const busy = loading || jobRunning || awaiting || !statusChecked;
   const previousJobState = useRef<string | null>(null);
   const submittedYaml = useRef<string | null>(null);
+  const latestStatusRequest = useRef(0);
 
   // create new version tag
   const latestVersionStr = "Latest";
@@ -131,26 +142,70 @@ export default function SimulatorHome() {
   }, []);
 
   useEffect(() => {
-    const savedYaml = localStorage.getItem('simulatorYaml');
+    const savedYaml = localStorage.getItem(SAVED_YAML_KEY);
     if (savedYaml) {
       setYamlInput(savedYaml);
     }
   }, []);
 
   const refreshJobStatus = useCallback(async () => {
+    const request = ++latestStatusRequest.current;
     const status = await SimulationService.getInstance().getSimulationStatus();
-    if (status) setJobStatus(status);
+    // A later request may have answered first; an older status would step the page back.
+    if (request !== latestStatusRequest.current) return;
+    if (status) {
+      if (awaitingRun.current) {
+        const { previousStartedAt } = awaitingRun.current;
+        if (status.startedAt === null || status.startedAt === previousStartedAt) return;
+        awaitingRun.current = null;
+        setAwaiting(false);
+      }
+      setJobStatus(status);
+    }
+    // After the status, which React 17 renders separately here: the page must not unlock
+    // before it knows whether a run is going. Unlocks even when the backend cannot be
+    // reached; starting then says why.
+    setStatusChecked(true);
   }, []);
 
   useEffect(() => {
     refreshJobStatus();
   }, [refreshJobStatus]);
 
+  // Each poll waits for the last: while the backend is busy computing, it answers late,
+  // and overlapping polls would pile up.
+  const polling = jobRunning || awaiting;
   useEffect(() => {
-    if (!jobRunning) return;
-    const timer = setInterval(refreshJobStatus, STATUS_POLL_MS);
-    return () => clearInterval(timer);
-  }, [jobRunning, refreshJobStatus]);
+    if (!polling) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      await refreshJobStatus();
+      if (!stopped) timer = setTimeout(poll, STATUS_POLL_MS);
+    };
+    timer = setTimeout(poll, STATUS_POLL_MS);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [polling, refreshJobStatus]);
+
+  // After a reload, show the YAML of the run that was submitted last instead of the last
+  // successful one, and finish what the page that submitted it could not.
+  const restoredRunningYaml = useRef(false);
+  useEffect(() => {
+    if (!statusChecked || restoredRunningYaml.current) return;
+    restoredRunningYaml.current = true;
+    const runningYaml = localStorage.getItem(RUNNING_YAML_KEY);
+    if (!runningYaml) return;
+
+    setYamlInput(runningYaml);
+    submittedYaml.current = runningYaml;
+    // Still going, its end is handled below; unknown, the backend may be down.
+    if (jobRunning || !jobStatus) return;
+    if (jobStatus?.state === "succeeded") localStorage.setItem(SAVED_YAML_KEY, runningYaml);
+    localStorage.removeItem(RUNNING_YAML_KEY);
+  }, [statusChecked]);
 
   // Tell the user how a run they watched ended.
   useEffect(() => {
@@ -158,9 +213,10 @@ export default function SimulatorHome() {
     const was = previousJobState.current;
     previousJobState.current = state;
     if (was !== "running" && was !== "cancelling") return;
+    if (state !== "running" && state !== "cancelling") localStorage.removeItem(RUNNING_YAML_KEY);
 
     if (state === "succeeded") {
-      if (submittedYaml.current) localStorage.setItem('simulatorYaml', submittedYaml.current);
+      if (submittedYaml.current) localStorage.setItem(SAVED_YAML_KEY, submittedYaml.current);
       setErrorLines([]);
       SwalHandler.fire({
         icon: 'success',
@@ -201,6 +257,9 @@ export default function SimulatorHome() {
       const { started, alreadyRunning, message } = await SimulationService.getInstance().startSimulation(yamlInput);
       if (started) {
         submittedYaml.current = yamlInput;
+        localStorage.setItem(RUNNING_YAML_KEY, yamlInput);
+        awaitingRun.current = { previousStartedAt: jobStatus?.startedAt ?? null };
+        setAwaiting(true);
         // Even a run that ends before the first poll counts as watched.
         previousJobState.current = "running";
       } else if (alreadyRunning) {
@@ -477,7 +536,9 @@ export default function SimulatorHome() {
                 disabled={busy || !yamlInput}
                 className={`${classes.button} ${classes.fullWidthButton}`}
               >
-                {jobRunning ? 'Simulation running...' : loading ? 'Loading...' : 'Start Simulation'}
+                {!statusChecked
+                  ? 'Checking simulation status...'
+                  : jobRunning || awaiting ? 'Simulation running...' : loading ? 'Loading...' : 'Start Simulation'}
               </Button>
               <Button
                 variant="contained"
@@ -589,6 +650,8 @@ export default function SimulatorHome() {
                   ? "45vh"
                   : "65vh"}
               options={{
+                // Until the status is known the YAML of a running run may still replace it.
+                readOnly: !statusChecked,
                 minimap: { enabled: false },
                 lineNumbers: "on",
                 wordWrap: "on",

@@ -162,7 +162,9 @@ def _run(specs: list[dict]) -> dict:
         raise HTTPException(status_code=409, detail="Training was cancelled.")
     if outcome is None:
         code = getattr(worker, "exitcode", None)
-        raise HTTPException(status_code=500, detail=f"Training process exited unexpectedly (exit code {code}).")
+        # -9 is SIGKILL, which the OOM killer sends.
+        hint = " It was killed, most likely for running out of memory." if code == -9 else ""
+        raise HTTPException(status_code=500, detail=f"Training process exited unexpectedly (exit code {code}).{hint}")
     if outcome["type"] == "failed":
         raise HTTPException(status_code=500, detail=outcome["detail"])
     return outcome["summary"]

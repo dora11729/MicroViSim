@@ -146,9 +146,9 @@ export default class MLScalingHandler {
     });
   }
 
-  // uniqueServiceName is "name	namespace	version"
+  // uniqueServiceName is "name\tnamespace\tversion"
   private displayName(service: string): string {
-    const [name, namespace, version] = service.split("	");
+    const [name, namespace, version] = service.split("\t");
     return `${name}.${namespace} (${version})`;
   }
 

@@ -18,7 +18,11 @@ export default class SimulationService extends IRequestHandler {
   constructor() {
     super("simulation");
 
+    // Both change as a run goes, so neither may be served from the 5-second cache the API
+    // allows by default; a cached status showed the previous run as just finished.
+    // (A new object: the default one is shared by every response.)
     this.addRoute("get", "/predictions", async (_, res) => {
+      res.cacheControl = { noStore: true };
       res.json(this.predictionComparison ?? { dates: [], methods: [], configuredMethod: "", services: [] });
     });
 
@@ -38,15 +42,20 @@ export default class SimulationService extends IRequestHandler {
           return res.status(400).json({ message: "The YAML is empty." });
         }
 
+        // Checked before the run starts, which clears the previous results: a typo in the
+        // YAML should not cost them. Validation reads nothing that clearing would remove.
+        const { errorMessage, parsedConfig } = SimulationConfigManager.getInstance().handleSimConfig(simConfigYamlString);
+        if (!parsedConfig) {
+          return res.status(400).json({ message: errorMessage || "The YAML could not be read." });
+        }
+
         // Runs in the background: training can outlast the HTTP request, so the page
         // follows the run through /status instead of waiting on this response.
         const started = SimulationJobManager.getInstance().start(
           progress => this.runSimulation(simConfigYamlString, progress).catch(err => {
             if (err instanceof SimulationFailedError || err instanceof SimulationCancelledError) throw err;
             throw new SimulationFailedError(
-              `Error simulate retrive data by YAML:
----
-${err instanceof Error ? err.message : err}`
+              `Error simulate retrive data by YAML:\n---\n${err instanceof Error ? err.message : err}`
             );
           })
         );
@@ -59,6 +68,7 @@ ${err instanceof Error ? err.message : err}`
     );
 
     this.addRoute("get", "/status", async (_, res) => {
+      res.cacheControl = { noStore: true };
       res.json(SimulationJobManager.getInstance().status());
     });
 
@@ -160,9 +170,7 @@ ${err instanceof Error ? err.message : err}`
       this.predictionComparison = simulationResult.predictionComparison ?? null;
     } catch (err) {
       throw new SimulationFailedError(
-        `Error while caching and creating historical and aggregated data:
----
-${err instanceof Error ? err.message : err}`
+        `Error while caching and creating historical and aggregated data:\n---\n${err instanceof Error ? err.message : err}`
       );
     }
   }

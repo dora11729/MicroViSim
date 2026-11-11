@@ -51,8 +51,9 @@ class SimulationJob implements ISimulationProgress {
     this.trainingProgress = null;
   }
 
+  // Polled progress can land after training ended; it no longer describes the run then.
   training(progress: TTrainingProgress) {
-    this.trainingProgress = progress;
+    if (this.activeStage() === "trainingModels") this.trainingProgress = progress;
   }
 
   warn(message: string) {

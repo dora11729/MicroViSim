@@ -46,10 +46,12 @@ export default class SimulationService {
     }
   }
 
-  // null when the backend cannot be reached.
+  // null when the backend cannot be reached. Never from the browser cache: the status
+  // changes from one poll to the next.
   async getSimulationStatus(): Promise<TSimulationJobStatus | null> {
     try {
-      return await this.get<TSimulationJobStatus>(`${this.prefix}/status`);
+      const res = await fetch(`${this.prefix}/status`, { cache: "no-store" });
+      return res.ok ? (await res.json()) as TSimulationJobStatus : null;
     } catch {
       return null;
     }

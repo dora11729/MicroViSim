@@ -42,3 +42,27 @@ describe("MLModelClient.train", () => {
     await expect(client.train(Services)).rejects.toThrow(/cannot reach the ML service at .* \(ECONNREFUSED\)/);
   });
 });
+
+describe("MLModelClient.train after an interrupted run", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it("stops the leftover training and trains again", async () => {
+    let trainCalls = 0;
+    const post = jest.spyOn(axios, "post").mockImplementation((url: string) => {
+      if (!url.endsWith("/train")) return Promise.resolve({ data: { cancelled: true } });
+      trainCalls += 1;
+      return trainCalls === 1
+        ? Promise.reject(new AxiosError("Conflict", "ERR_BAD_REQUEST", undefined, undefined,
+          { status: 409, data: { detail: "Another training run is in progress." } } as any))
+        : Promise.resolve({ data: { splitMethod: "assign", cached: false } });
+    });
+    jest.spyOn(axios, "get").mockResolvedValue({ data: { running: false } });
+    const warn = jest.fn();
+
+    await client.train(Services, { ...NoProgress, warn });
+
+    expect(trainCalls).toBe(2);
+    expect(post).toHaveBeenCalledWith(expect.stringMatching(/\/train\/cancel$/));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("left over"));
+  });
+});

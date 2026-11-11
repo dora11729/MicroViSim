@@ -9,6 +9,8 @@ import {
 } from "../../entities/TSimulationProgress";
 
 const PROGRESS_POLL_MS = 2000;
+const LEFTOVER_STOP_TIMEOUT_MS = 30_000;
+const LEFTOVER_POLL_MS = 500;
 
 export type MLModelType = "arima" | "bilstm" | "gru";
 export type TMultiStepForecast = typeof multiStepForecasts[number];
@@ -43,12 +45,26 @@ export default class MLModelClient {
     progress.signal.addEventListener("abort", cancelTraining);
     const poller = setInterval(() => this.relayTrainingProgress(progress), PROGRESS_POLL_MS);
 
+    const requestTraining = async (): Promise<{ splitMethod: string; cached: boolean }> =>
+      (await axios.post(`${this.baseUrl}/train`, { services }, { timeout: 0, signal: progress.signal })).data;
+    const failure = (e: unknown) => progress.signal.aborted
+      ? new SimulationCancelledError()
+      : new SimulationFailedError(`Model training failed: ${this.describeError(e)}`);
+
     let body: { splitMethod: string; cached: boolean };
     try {
-      body = (await axios.post(`${this.baseUrl}/train`, { services }, { timeout: 0, signal: progress.signal })).data;
+      body = await requestTraining();
     } catch (e) {
-      if (progress.signal.aborted) throw new SimulationCancelledError();
-      throw new SimulationFailedError(`Model training failed: ${this.describeError(e)}`);
+      if (progress.signal.aborted || !this.isLeftoverTraining(e)) throw failure(e);
+      // One simulation runs at a time, so a training run the ML service is still busy
+      // with was left behind by an interrupted one: a backend restart or a lost cancel.
+      progress.warn("Stopped a model training run left over from an earlier, interrupted simulation.");
+      await this.stopLeftoverTraining(progress);
+      try {
+        body = await requestTraining();
+      } catch (retryError) {
+        throw failure(retryError);
+      }
     } finally {
       clearInterval(poller);
       progress.signal.removeEventListener("abort", cancelTraining);
@@ -101,6 +117,24 @@ export default class MLModelClient {
       }
     } catch {
       // Progress is only shown, never relied on; the next poll may get through.
+    }
+  }
+
+  private isLeftoverTraining(e: unknown): boolean {
+    return axios.isAxiosError(e) && e.response?.status === 409 &&
+      String(e.response.data?.detail ?? "").startsWith("Another training run");
+  }
+
+  // Cancels it and waits until the ML service is free, or gives up after a while.
+  private async stopLeftoverTraining(progress: ISimulationProgress) {
+    await axios.post(`${this.baseUrl}/train/cancel`);
+    const deadline = Date.now() + LEFTOVER_STOP_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, LEFTOVER_POLL_MS));
+      progress.throwIfCancelled();
+      const { data } = await axios.get<{ running: boolean }>(`${this.baseUrl}/train/progress`);
+      // The run reports itself stopped just before it frees the ML service; give it a beat.
+      if (!data.running) return new Promise(resolve => setTimeout(resolve, LEFTOVER_POLL_MS));
     }
   }
 
