@@ -24,7 +24,7 @@ import MLScalingHandler, { TPredictedLoadsByStrategy } from "./MLScalingHandler"
 import { TMLFallbackReason } from "./PredictedLoadPropagator";
 import PredictionComparisonBuilder from "./PredictionComparisonBuilder";
 import { TPredictionComparison } from "../../entities/TPredictionComparison";
-import { ISimulationProgress, NoProgress } from "../../entities/TSimulationProgress";
+import { ISimulationProgress, NoProgress, yieldToEventLoop } from "../../entities/TSimulationProgress";
 import PredictionAccuracyTracker from "./PredictionAccuracyTracker";
 import SimulationRandom from "../SimulationRandom";
 
@@ -65,6 +65,7 @@ export default class LoadSimulationHandler {
   }> {
 
     progress.stage("simulatingTraffic");
+    await yieldToEventLoop();
 
     // Reseed before anything draws, so the whole run replays from this one number.
     const seed = this.random.reset(loadSimulationSettings.config.randomSeed);
@@ -117,6 +118,7 @@ export default class LoadSimulationHandler {
       with base error rate to calculate the adjusted error rate per endpoint, per timeSlot.
     */
     progress.stage("simulatingLoadEffects", "Applying overload errors and latency, propagating requests again");
+    await yieldToEventLoop();
     this.overloadErrorRateAndLatencyEstimator.adjustedErrorRateAndLatencyByOverload(
       loadSimulationSettings.config.overloadErrorRateIncreaseFactor,
       loadSimulationSettings.config.overloadLatencyIncreaseFactor,
@@ -148,6 +150,7 @@ export default class LoadSimulationHandler {
     });
 
     progress.stage("generatingMetrics");
+    await yieldToEventLoop();
     const realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]> = this.dataGenerator.generateRealtimeDataFromSimulationResults(
       EndpointRealTimeBaseDatas,
       propagationResultsWithOverloadError,
@@ -501,6 +504,7 @@ export default class LoadSimulationHandler {
       progress,
     });
     progress.stage("simulatingLoadEffects", "Scaling replicas");
+    await yieldToEventLoop();
     const predictedLoads = predictedLoadsByStrategy.get(loadSimulationSettings.config.multiStepForecast) ?? new Map();
 
     // ns: namespace

@@ -18,7 +18,7 @@ import Swal from 'sweetalert2'
 import withReactContent from 'sweetalert2-react-content'
 import { useNavigate } from "react-router-dom";
 import SimulationProgress from "../../components/SimulationProgress";
-import { isRunning, TSimulationJobStatus } from "../../entities/TSimulationJob";
+import { isRunning, justStartedStatus, TSimulationJobStatus } from "../../entities/TSimulationJob";
 
 const SwalHandler = withReactContent(Swal);
 const STATUS_POLL_MS = 1500;
@@ -220,12 +220,9 @@ export default function SimulatorHome() {
       setErrorLines([]);
       SwalHandler.fire({
         icon: 'success',
-        title: 'Simulation completed',
-        text: jobStatus?.warnings.length ? 'Completed with warnings; see the progress panel.' : undefined,
-        showCancelButton: true,
-        confirmButtonText: 'Open Metrics',
-        cancelButtonText: 'Close',
-      }).then(result => { if (result.isConfirmed) navigate("/metrics"); });
+        title: 'Success',
+        text: 'Simulation completed successfully!',
+      });
     } else if (state === "failed") {
       const lines = splitErrorLines(jobStatus?.error ?? "Unknown error.");
       setErrorLines(lines);
@@ -262,6 +259,9 @@ export default function SimulatorHome() {
         setAwaiting(true);
         // Even a run that ends before the first poll counts as watched.
         previousJobState.current = "running";
+        // The backend may answer the first poll only after a long stage; until then the
+        // panel shows this run from its start, not how the last one ended.
+        setJobStatus(justStartedStatus());
       } else if (alreadyRunning) {
         await SwalHandler.fire({ icon: 'warning', title: 'Simulation already running', text: message });
       } else {

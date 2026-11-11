@@ -40,6 +40,11 @@ export class SimulationCancelledError extends Error {
 // A failure meant for the user as is, e.g. invalid YAML or a failed training run.
 export class SimulationFailedError extends Error {}
 
+// The simulation computes without awaiting for long stretches, which holds back every
+// other request, status polls and cancels included. Awaited as a long stage begins, so
+// they are answered and the page sees the stage it is in.
+export const yieldToEventLoop = () => new Promise<void>(resolve => setImmediate(resolve));
+
 // For callers that run a simulation outside a job, such as tests.
 export const NoProgress: ISimulationProgress = {
   signal: new AbortController().signal,
