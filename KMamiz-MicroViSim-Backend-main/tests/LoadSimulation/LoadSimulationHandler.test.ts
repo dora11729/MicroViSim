@@ -174,7 +174,9 @@ describe("LoadSimulationHandler model-driven auto-scaling", () => {
     jest.spyOn(client, "predictShares").mockResolvedValue(sharesByStrategy([null, 21, 21, 21]));
 
     expect(await scale([1, 1, 1, 1], 1, { model: "gru" }, Daily)).toEqual([1, 3, 3, 3]);
-    expect(train).toHaveBeenCalledWith([{ service: UniqueServiceName, model: "gru", dailyRequestCount: Daily }]);
+    expect(train).toHaveBeenCalledWith(
+      [{ service: UniqueServiceName, model: "gru", dailyRequestCount: Daily }], expect.anything()
+    );
   });
 
   it("scales by the configured strategy only", async () => {

@@ -24,6 +24,7 @@ import MLScalingHandler, { TPredictedLoadsByStrategy } from "./MLScalingHandler"
 import { TMLFallbackReason } from "./PredictedLoadPropagator";
 import PredictionComparisonBuilder from "./PredictionComparisonBuilder";
 import { TPredictionComparison } from "../../entities/TPredictionComparison";
+import { ISimulationProgress, NoProgress } from "../../entities/TSimulationProgress";
 import PredictionAccuracyTracker from "./PredictionAccuracyTracker";
 import SimulationRandom from "../SimulationRandom";
 
@@ -54,13 +55,16 @@ export default class LoadSimulationHandler {
     dependOnMapWithCallProbability: TDependOnMapWithCallProbability,
     baseReplicaCountList: TReplicaCount[],
     EndpointRealTimeBaseDatas: Map<string, TBaseDataWithResponses>,
-    simulateDate: number
+    simulateDate: number,
+    progress: ISimulationProgress = NoProgress
   ): Promise<{
     realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]>;
     realtimeReplicaCountTimeline: Map<string, TReplicaCount[]>;
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>
     predictionComparison: TPredictionComparison;
   }> {
+
+    progress.stage("simulatingTraffic");
 
     // Reseed before anything draws, so the whole run replays from this one number.
     const seed = this.random.reset(loadSimulationSettings.config.randomSeed);
@@ -101,7 +105,8 @@ export default class LoadSimulationHandler {
       loadSimulationSettings,
       dependOnMapWithCallProbability,
       propagationResultsWithBasicError,
-      metricsPerTimeSlotMap
+      metricsPerTimeSlotMap,
+      progress
     )
 
     const serviceReceivedRequestCount = this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithBasicError);
@@ -111,6 +116,7 @@ export default class LoadSimulationHandler {
       the number of replicas, and per-replica throughput capacity. Then combine 
       with base error rate to calculate the adjusted error rate per endpoint, per timeSlot.
     */
+    progress.stage("simulatingLoadEffects", "Applying overload errors and latency, propagating requests again");
     this.overloadErrorRateAndLatencyEstimator.adjustedErrorRateAndLatencyByOverload(
       loadSimulationSettings.config.overloadErrorRateIncreaseFactor,
       loadSimulationSettings.config.overloadLatencyIncreaseFactor,
@@ -141,6 +147,7 @@ export default class LoadSimulationHandler {
       configuredMethod: loadSimulationSettings.config.multiStepForecast,
     });
 
+    progress.stage("generatingMetrics");
     const realtimeCombinedDataPerTimeSlotMap: Map<string, TCombinedRealtimeData[]> = this.dataGenerator.generateRealtimeDataFromSimulationResults(
       EndpointRealTimeBaseDatas,
       propagationResultsWithOverloadError,
@@ -479,6 +486,7 @@ export default class LoadSimulationHandler {
     dependOnMapWithCallProbability: TDependOnMapWithCallProbability,
     propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>,
+    progress: ISimulationProgress = NoProgress,
   ): Promise<TPredictedLoadsByStrategy> {
     const serviceMetrics = loadSimulationSettings.serviceMetrics;
     const serviceReceivedRequestCount = this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithBasicError);
@@ -490,7 +498,9 @@ export default class LoadSimulationHandler {
       dependOnMap: dependOnMapWithCallProbability,
       metricsPerTimeSlotMap,
       sortedTimeSlotKeys,
+      progress,
     });
+    progress.stage("simulatingLoadEffects", "Scaling replicas");
     const predictedLoads = predictedLoadsByStrategy.get(loadSimulationSettings.config.multiStepForecast) ?? new Map();
 
     // ns: namespace

@@ -372,20 +372,29 @@ def _predict_direct(model_type: str, directory: Path, hourly: np.ndarray, target
 
 # --------------------------------------------------------------------- API --
 
-def train(model_type: str, series: np.ndarray, directory: Path) -> dict:
-    """Trains a one-minute model on a percent-of-day series."""
+TRAINING_STEPS = ("one-minute model", "rectify kNN", "direct models", "hourly model")
+
+
+def train(model_type: str, series: np.ndarray, directory: Path,
+          on_step: Callable[[str], None] = lambda step: None) -> dict:
+    """Trains a one-minute model on a percent-of-day series, and every strategy built on
+    it; on_step is told each of TRAINING_STEPS as it starts."""
     if model_type not in MODEL_TYPES:
         raise ValueError(f"unknown model '{model_type}'")
     directory.mkdir(parents=True, exist_ok=True)
     series = np.asarray(series, float)
 
+    on_step(TRAINING_STEPS[0])
     if model_type == "arima":
         details = _train_arima(series, directory)
     else:
         details = _train_recurrent(model_type, series, directory)
     hourly, truth = hour_start_samples(series)
+    on_step(TRAINING_STEPS[1])
     k = _train_rectify(model_type, directory, hourly, truth)
+    on_step(TRAINING_STEPS[2])
     _train_direct(model_type, directory, hourly, truth)
+    on_step(TRAINING_STEPS[3])
     from services import hourly_forecasters   # it imports this module
     hourly_forecasters.train(model_type, hourly, directory / HOURLY_DIR)
 

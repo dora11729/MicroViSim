@@ -5,6 +5,8 @@ import ServiceOperator from "../../services/ServiceOperator";
 import ImportExportHandler from "../../services/ImportExportHandler";
 import multer from "multer";
 import { TPredictionComparison } from "../entities/TPredictionComparison";
+import SimulationJobManager from "../classes/SimulationJob";
+import { ISimulationProgress, SimulationCancelledError, SimulationFailedError } from "../entities/TSimulationProgress";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -33,16 +35,41 @@ export default class SimulationService extends IRequestHandler {
 
         const simConfigYamlString = simConfigYamlFile.buffer.toString("utf-8").trim();
         if (!simConfigYamlString) {
-          return res.status(200).json({
-            message: "Received an empty YAML. Skipping data retrieval.",
-          });
+          return res.status(400).json({ message: "The YAML is empty." });
         }
 
-        const { status, message } = await this.processSimulationFromYaml(simConfigYamlString);
-        return res.status(status).json({ message });
+        // Runs in the background: training can outlast the HTTP request, so the page
+        // follows the run through /status instead of waiting on this response.
+        const started = SimulationJobManager.getInstance().start(
+          progress => this.runSimulation(simConfigYamlString, progress).catch(err => {
+            if (err instanceof SimulationFailedError || err instanceof SimulationCancelledError) throw err;
+            throw new SimulationFailedError(
+              `Error simulate retrive data by YAML:
+---
+${err instanceof Error ? err.message : err}`
+            );
+          })
+        );
+        if (!started) {
+          return res.status(409).json({ message: "A simulation is already running. Wait for it to finish or cancel it first." });
+        }
+        return res.status(202).json({ message: "Simulation started." });
       },
       [upload.single("file")]
     );
+
+    this.addRoute("get", "/status", async (_, res) => {
+      res.json(SimulationJobManager.getInstance().status());
+    });
+
+    this.addRoute("post", "/cancel", async (_, res) => {
+      const outcome = SimulationJobManager.getInstance().cancel();
+      if (outcome === "notRunning") return res.status(409).json({ message: "No simulation is running." });
+      if (outcome === "notCancellable") {
+        return res.status(409).json({ message: "The results are being saved; the simulation can no longer be cancelled." });
+      }
+      return res.status(202).json({ message: "Cancelling the simulation." });
+    });
 
     this.addRoute(
       "get",
@@ -97,65 +124,46 @@ export default class SimulationService extends IRequestHandler {
     );
   }
 
-  private async processSimulationFromYaml(
-    yamlData: string,
-  ): Promise<{ status: number; message: string }> {
-
+  // Throws SimulationFailedError with a message for the user, or SimulationCancelledError.
+  private async runSimulation(yamlData: string, progress: ISimulationProgress): Promise<void> {
     const simulateDate = Date.now();  // The time at the start of the simulation.
     this.predictionComparison = null;
 
+    progress.stage("validating");
+    //clear all simulator data first
+    await ImportExportHandler.getInstance().clearData();
+
+    //retrieve data from yaml
+    const simulationResult = await Simulator.getInstance().generateSimulationDataFromConfig(
+      yamlData, simulateDate, progress
+    );
+    if (simulationResult.validationErrorMessage) {
+      throw new SimulationFailedError(simulationResult.validationErrorMessage);
+    }
+    if (simulationResult.convertingErrorMessage) {
+      throw new SimulationFailedError(simulationResult.convertingErrorMessage);
+    }
+
+    progress.stage("saving");
+    //update to cache and create historical and aggregatedData
     try {
-      //clear all simulator data first
-      await ImportExportHandler.getInstance().clearData();
+      ServiceOperator.getInstance().updateStaticSimulateDataToCache({
+        dependencies: simulationResult.endpointDependencies,
+        dataTypes: simulationResult.dataType,
+        replicaCounts: simulationResult.basicReplicaCountList,
+      });
 
-      //retrieve data from yaml
-      const simulationResult = await Simulator.getInstance().generateSimulationDataFromConfig(
-        yamlData, simulateDate
-      );
-
-      if (simulationResult.validationErrorMessage) {
-        return {
-          status: 400,
-          message: simulationResult.validationErrorMessage,
-        };
-      } else if (simulationResult.convertingErrorMessage) {
-        return {
-          status: 500,
-          message: simulationResult.convertingErrorMessage,
-        };
-      } else {
-
-        //update to cache and create historical and aggregatedData
-        try {
-          ServiceOperator.getInstance().updateStaticSimulateDataToCache({
-            dependencies: simulationResult.endpointDependencies,
-            dataTypes: simulationResult.dataType,
-            replicaCounts: simulationResult.basicReplicaCountList,
-          });
-
-          await ServiceOperator.getInstance().updateDynamicSimulateData({
-            realtimeDataMap: simulationResult.realtimeCombinedDataPerTimeSlotMap,
-            realtimeReplicaCountTimeline: simulationResult.realtimeReplicaCountTimeline,
-          });
-          this.predictionComparison = simulationResult.predictionComparison ?? null;
-
-          return {
-            status: 201,
-            message: "ok",
-          };
-        } catch (err) {
-          return {
-            status: 500,
-            message: `Error while caching and creating historical and aggregated data:\n---\n${err instanceof Error ? err.message : err}`,
-          };
-        }
-
-      }
+      await ServiceOperator.getInstance().updateDynamicSimulateData({
+        realtimeDataMap: simulationResult.realtimeCombinedDataPerTimeSlotMap,
+        realtimeReplicaCountTimeline: simulationResult.realtimeReplicaCountTimeline,
+      });
+      this.predictionComparison = simulationResult.predictionComparison ?? null;
     } catch (err) {
-      return {
-        status: 500,
-        message: `Error simulate retrive data by YAML:\n---\n${err instanceof Error ? err.message : err}`,
-      };
+      throw new SimulationFailedError(
+        `Error while caching and creating historical and aggregated data:
+---
+${err instanceof Error ? err.message : err}`
+      );
     }
   }
 }

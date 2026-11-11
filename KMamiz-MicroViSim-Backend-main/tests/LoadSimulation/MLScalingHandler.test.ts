@@ -120,7 +120,7 @@ describe("MLScalingHandler", () => {
       sortedTimeSlotKeys: Slots,
     });
 
-    expect(predictShares).toHaveBeenCalledWith(Gateway, "bilstm", [1, 2, 0], multiStepForecasts);
+    expect(predictShares).toHaveBeenCalledWith(Gateway, "bilstm", [1, 2, 0], multiStepForecasts, expect.anything());
     expect(Array.from(table.keys())).toEqual(multiStepForecasts);
     expect(table.get("recursive")!.get(Slots[2])!.get(Gateway)).toEqual({ status: "ok", rps: 20 });
     expect(table.get("direct")!.get(Slots[1])!.get(Gateway)).toEqual({ status: "ok", rps: 5 });

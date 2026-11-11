@@ -6,6 +6,7 @@ import {
   useState,
   useEffect,
   useRef,
+  useCallback,
 } from "react";
 import SimulationService from "../../services/SimulationService";
 import DataService from "../../services/DataService";
@@ -16,8 +17,15 @@ import YAML from 'yaml';
 import Swal from 'sweetalert2'
 import withReactContent from 'sweetalert2-react-content'
 import { useNavigate } from "react-router-dom";
+import SimulationProgress from "../../components/SimulationProgress";
+import { isRunning, TSimulationJobStatus } from "../../entities/TSimulationJob";
 
 const SwalHandler = withReactContent(Swal);
+const STATUS_POLL_MS = 1500;
+const splitErrorLines = (message: string) =>
+  message.split('
+---
+').map(line => line.trim()).filter(line => line.length > 0);
 
 const useStyles = makeStyles(() => ({
   container: {
@@ -92,6 +100,13 @@ export default function SimulatorHome() {
 
   const [loading, setLoading] = useState(false);
 
+  // The latest simulation run, which may have been started from another tab or before a reload.
+  const [jobStatus, setJobStatus] = useState<TSimulationJobStatus | null>(null);
+  const jobRunning = isRunning(jobStatus);
+  const busy = loading || jobRunning;
+  const previousJobState = useRef<string | null>(null);
+  const submittedYaml = useRef<string | null>(null);
+
   // create new version tag
   const latestVersionStr = "Latest";
   const [newVersionTagToCreate, setNewVersionTagToCreate] = useState<string>("");
@@ -124,6 +139,48 @@ export default function SimulatorHome() {
     }
   }, []);
 
+  const refreshJobStatus = useCallback(async () => {
+    const status = await SimulationService.getInstance().getSimulationStatus();
+    if (status) setJobStatus(status);
+  }, []);
+
+  useEffect(() => {
+    refreshJobStatus();
+  }, [refreshJobStatus]);
+
+  useEffect(() => {
+    if (!jobRunning) return;
+    const timer = setInterval(refreshJobStatus, STATUS_POLL_MS);
+    return () => clearInterval(timer);
+  }, [jobRunning, refreshJobStatus]);
+
+  // Tell the user how a run they watched ended.
+  useEffect(() => {
+    const state = jobStatus?.state ?? null;
+    const was = previousJobState.current;
+    previousJobState.current = state;
+    if (was !== "running" && was !== "cancelling") return;
+
+    if (state === "succeeded") {
+      if (submittedYaml.current) localStorage.setItem('simulatorYaml', submittedYaml.current);
+      setErrorLines([]);
+      SwalHandler.fire({
+        icon: 'success',
+        title: 'Simulation completed',
+        text: jobStatus?.warnings.length ? 'Completed with warnings; see the progress panel.' : undefined,
+        showCancelButton: true,
+        confirmButtonText: 'Open Metrics',
+        cancelButtonText: 'Close',
+      }).then(result => { if (result.isConfirmed) navigate("/metrics"); });
+    } else if (state === "failed") {
+      const lines = splitErrorLines(jobStatus?.error ?? "Unknown error.");
+      setErrorLines(lines);
+      SwalHandler.fire({ icon: 'error', title: 'Simulation failed', text: lines[0] });
+    } else if (state === "cancelled") {
+      SwalHandler.fire({ icon: 'info', title: 'Simulation cancelled' });
+    }
+  }, [jobStatus?.state, jobStatus?.startedAt]);
+
   const handleStartSimulateClick = async () => {
     if (!yamlInput) {
       return;
@@ -140,34 +197,43 @@ export default function SimulatorHome() {
       return;
     }
 
-    // console.log(`handleStartSimulateClick 開始計算總執行時間`);
-    // const startTime = performance.now();
     setLoading(true);
     setErrorLines([]);
     try {
-      const { message, resStatus } = await SimulationService.getInstance().retrieveDataBySimulateYaml(yamlInput);
-
-      if (resStatus >= 400) {
-        const lines = message.split('\n---\n').map(line => line.trim()).filter(line => line.length > 0);
-
-        setErrorLines(lines);
-        console.error(`${message}`)
+      const { started, alreadyRunning, message } = await SimulationService.getInstance().startSimulation(yamlInput);
+      if (started) {
+        submittedYaml.current = yamlInput;
+        // Even a run that ends before the first poll counts as watched.
+        previousJobState.current = "running";
+      } else if (alreadyRunning) {
+        await SwalHandler.fire({ icon: 'warning', title: 'Simulation already running', text: message });
       } else {
-        localStorage.setItem('simulatorYaml', yamlInput);
-        // setYamlInput("");
-        setErrorLines([]);
-        await SwalHandler.fire({
-          icon: 'success',
-          title: 'Success',
-          text: 'Simulation completed successfully!',
-        });
+        setErrorLines(splitErrorLines(message));
+        console.error(message);
       }
+      await refreshJobStatus();
     } finally {
       setLoading(false);
-      // const endTime = performance.now(); // 結束時間
-      // const duration = endTime - startTime;
-      // console.log(`handleStartSimulateClick 總執行時間: ${duration.toFixed(2)} 毫秒`);
     }
+  };
+
+  const handleCancelSimulationClick = async () => {
+    const result = await SwalHandler.fire({
+      icon: 'warning',
+      title: 'Cancel the simulation?',
+      text: 'Model training stops as well. Data from earlier runs was already cleared when this run started.',
+      showCancelButton: true,
+      confirmButtonText: 'Cancel Simulation',
+      confirmButtonColor: '#d33',
+      cancelButtonText: 'Keep Running',
+    });
+    if (!result.isConfirmed) return;
+
+    const { accepted, message } = await SimulationService.getInstance().cancelSimulation();
+    if (!accepted) {
+      await SwalHandler.fire({ icon: 'error', title: 'Could not cancel', text: message });
+    }
+    await refreshJobStatus();
   };
 
   const handleGenerateYamlClick = async () => {
@@ -410,16 +476,16 @@ export default function SimulatorHome() {
                 variant="contained"
                 color="primary"
                 onClick={handleStartSimulateClick}
-                disabled={loading || !yamlInput}
+                disabled={busy || !yamlInput}
                 className={`${classes.button} ${classes.fullWidthButton}`}
               >
-                {loading ? 'Loading...' : 'Start Simulation'}
+                {jobRunning ? 'Simulation running...' : loading ? 'Loading...' : 'Start Simulation'}
               </Button>
               <Button
                 variant="contained"
                 color="secondary"
                 onClick={handleGenerateYamlClick}
-                disabled={loading}
+                disabled={busy}
                 className={classes.button}
               >
                 {loading ? 'Loading...' : 'Generate YAML from Simulator Data'}
@@ -428,7 +494,7 @@ export default function SimulatorHome() {
                 variant="contained"
                 color="error"
                 onClick={handleCloneDataClick}
-                disabled={loading}
+                disabled={busy}
                 className={classes.button}
               >
                 {loading ? 'Loading...' : 'Clone Data from KMamiz '}
@@ -437,7 +503,7 @@ export default function SimulatorHome() {
                 variant="contained"
                 color="success"
                 onClick={handleUploadDatasetClick}
-                disabled={loading}
+                disabled={busy}
                 className={classes.button}
               >
                 {loading ? 'Loading...' : 'Upload Training Dataset'}
@@ -445,7 +511,7 @@ export default function SimulatorHome() {
               <Button
                 variant="contained"
                 onClick={() => navigate("/converter")}
-                disabled={loading}
+                disabled={busy}
                 className={classes.button}
                 sx={{ background: "linear-gradient(90deg, #1565c0, #6a1b9a)", color: "#fff" }}
               >
@@ -463,7 +529,7 @@ export default function SimulatorHome() {
                 variant="contained"
                 color="error"
                 onClick={handleGenerateExampleYamlClick}
-                disabled={loading}
+                disabled={busy}
                 className={classes.button}
               >
                 {loading ? 'Loading...' : 'Use Example YAML'}
@@ -471,7 +537,7 @@ export default function SimulatorHome() {
               {/* <Button
                 variant="contained"
                 color="success"
-                disabled={loading}
+                disabled={busy}
                 className={classes.button}
               >
                 {loading ? 'Loading...' : 'Export Simulation Report'}
@@ -494,7 +560,7 @@ export default function SimulatorHome() {
                 <Button
                   variant="contained"
                   onClick={() => createNewVersion()}
-                  disabled={!newVersionTagToCreate || loading}
+                  disabled={!newVersionTagToCreate || busy}
 
                 >
                   {loading ? 'Loading...' : 'Create'}
@@ -502,6 +568,11 @@ export default function SimulatorHome() {
               </Tooltip>
             </Card>
           </Grid>
+          {jobStatus && jobStatus.state !== "idle" && (
+            <Grid item xs={12}>
+              <SimulationProgress status={jobStatus} onCancel={handleCancelSimulationClick} />
+            </Grid>
+          )}
           {isInSmallScreen && errorLines.length > 0 && (
             <Grid item xs={12}>
               <ErrorMessageCard height="20vh" />

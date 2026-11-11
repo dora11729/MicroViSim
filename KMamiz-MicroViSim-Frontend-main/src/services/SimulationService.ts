@@ -2,6 +2,7 @@ import Config from "../../Config";
 import YAML from 'yaml';
 import { DataView } from "./DataView";
 import { TPredictionComparison } from "../entities/TPredictionComparison";
+import { TSimulationJobStatus } from "../entities/TSimulationJob";
 
 export default class SimulationService {
   private static instance?: SimulationService;
@@ -24,23 +25,44 @@ export default class SimulationService {
     );
   }
 
-  async retrieveDataBySimulateYaml(simConfigYAML: string) {
+  // Starts a run in the background (202); 409 when one is already running. The run is
+  // followed through getSimulationStatus().
+  async startSimulation(simConfigYAML: string): Promise<{ started: boolean; alreadyRunning: boolean; message: string }> {
     const blob = new Blob([simConfigYAML], { type: 'text/yaml' });
     const formData = new FormData();
     formData.append('file', blob, 'simConfig.yaml');
+    try {
+      const res = await fetch(`${this.prefix}/startSimulation`, {
+        method: "POST",
+        body: formData,
+      });
+      const resBody = await res.json().catch(() => ({}));
+      const message = typeof resBody.message === 'string'
+        ? resBody.message
+        : resBody.message !== undefined ? JSON.stringify(resBody.message) : `HTTP ${res.status}`;
+      return { started: res.status === 202, alreadyRunning: res.status === 409, message };
+    } catch (err) {
+      return { started: false, alreadyRunning: false, message: `Cannot reach the simulator backend: ${err}` };
+    }
+  }
 
-    const res = await fetch(`${this.prefix}/startSimulation`, {
-      method: "POST",
-      body: formData,
-    });
+  // null when the backend cannot be reached.
+  async getSimulationStatus(): Promise<TSimulationJobStatus | null> {
+    try {
+      return await this.get<TSimulationJobStatus>(`${this.prefix}/status`);
+    } catch {
+      return null;
+    }
+  }
 
-    const resBody = await res.json();
-    return {
-      message: typeof resBody.message === 'string'
-        ? String(resBody.message)
-        : JSON.stringify(resBody.message),
-      resStatus: res.status
-    };
+  async cancelSimulation(): Promise<{ accepted: boolean; message: string }> {
+    try {
+      const res = await fetch(`${this.prefix}/cancel`, { method: "POST" });
+      const resBody = await res.json().catch(() => ({}));
+      return { accepted: res.status === 202, message: resBody.message ?? `HTTP ${res.status}` };
+    } catch (err) {
+      return { accepted: false, message: `Cannot reach the simulator backend: ${err}` };
+    }
   }
 
 

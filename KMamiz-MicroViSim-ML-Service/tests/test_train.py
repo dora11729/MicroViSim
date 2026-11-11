@@ -15,9 +15,10 @@ def trained(tmp_path, monkeypatch):
     """Redirects model storage to tmp_path and replaces training with a recorder."""
     monkeypatch.setattr(model_store, "FINETUNE_DIR", tmp_path)
     monkeypatch.setattr(model_store, "MANIFEST", tmp_path / "manifest.json")
+    monkeypatch.setattr(train_module, "RUN_IN_SUBPROCESS", False)
     calls = {"series": {}, "fail": set()}
 
-    def fake_train(model_type, series, directory):
+    def fake_train(model_type, series, directory, on_step=lambda step: None):
         service = directory.name
         if service in calls["fail"]:
             raise RuntimeError("boom")
@@ -65,3 +66,56 @@ def test_keeps_a_service_shape_when_another_is_renamed(trained):
     after = trained["series"][model_store.service_dir("s0").name]
 
     assert (before == after).all()
+
+
+def test_reports_which_service_and_step_is_training(trained, monkeypatch):
+    record = forecasters.train
+
+    def stepping_train(model_type, series, directory, on_step=lambda step: None):
+        on_step("rectify kNN")
+        return record(model_type, series, directory, on_step)
+
+    monkeypatch.setattr(forecasters, "train", stepping_train)
+    reports = []
+    specs = [s.model_dump() for s in request({"a": 100, "b": 50}).services]
+    train_module._train_all(specs, lambda **progress: reports.append(progress))
+
+    assert reports == [
+        {"done": 0, "service": "a", "model": "gru", "step": None},
+        {"step": "rectify kNN"},
+        {"done": 1, "service": "b", "model": "gru", "step": None},
+        {"step": "rectify kNN"},
+        {"done": 2, "step": None},
+    ]
+    assert train_module.train_progress() == {"running": False}
+
+
+def test_refuses_a_second_run_while_one_is_training(trained):
+    assert train_module._job.lock.acquire(blocking=False)
+    try:
+        with pytest.raises(HTTPException) as refused:
+            train_module.train(request({"a": 100}))
+        assert refused.value.status_code == 409
+    finally:
+        train_module._job.lock.release()
+
+
+def test_stops_and_forgets_a_cancelled_run(trained, monkeypatch):
+    record = forecasters.train
+
+    def cancelled_train(model_type, series, directory, on_step=lambda step: None):
+        assert train_module.cancel_training() == {"cancelled": True}
+        return record(model_type, series, directory, on_step)
+
+    monkeypatch.setattr(forecasters, "train", cancelled_train)
+    with pytest.raises(HTTPException) as cancelled:
+        train_module.train(request({"a": 100}))
+    assert cancelled.value.status_code == 409
+
+    # The cancelled run left no cache behind.
+    monkeypatch.setattr(forecasters, "train", record)
+    assert train_module.train(request({"a": 100}))["cached"] is False
+
+
+def test_has_nothing_to_cancel_when_idle():
+    assert train_module.cancel_training() == {"cancelled": False}

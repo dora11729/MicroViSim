@@ -10,6 +10,7 @@ import {
   TCMetricsPerTimeSlot,
   TDependOnMapWithCallProbability,
 } from "../../entities/TLoadSimulation";
+import { ISimulationProgress, NoProgress } from "../../entities/TSimulationProgress";
 
 const SECONDS_PER_HOUR = 3600;
 const PERCENT = 100;
@@ -45,7 +46,9 @@ export default class MLScalingHandler {
     dependOnMap: TDependOnMapWithCallProbability;
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>;
     sortedTimeSlotKeys: string[];
+    progress?: ISimulationProgress;
   }): Promise<TPredictedLoadsByStrategy> {
+    const progress = input.progress ?? NoProgress;
     const modelServices = this.modelServices(input.serviceMetrics);
     if (modelServices.size === 0) return new Map();
 
@@ -57,10 +60,16 @@ export default class MLScalingHandler {
     ));
 
     if (training.length > 0) {
-      await this.mlClient.train(training);
-      for (const { service, model, dailyRequestCount } of training) {
+      progress.stage("trainingModels", `${training.length} service(s)`);
+      await this.mlClient.train(training, progress);
+      for (const [i, { service, model, dailyRequestCount }] of training.entries()) {
+        progress.stage("simulatingLoadEffects",
+          `Forecasting load: ${this.displayName(service)} (${model}), ${i + 1}/${training.length}`);
         const shares = this.observedShares(service, profile, input.sortedTimeSlotKeys, input.metricsPerTimeSlotMap);
-        const predicted = await this.mlClient.predictShares(service, model, shares, multiStepForecasts);
+        const predicted = await this.mlClient.predictShares(service, model, shares, multiStepForecasts, progress.signal);
+        if (!predicted) {
+          progress.warn(`Prediction failed for ${this.displayName(service)} (${model}); it scales by the last hour's traffic instead.`);
+        }
         for (const strategy of multiStepForecasts) {
           const strategyShares = predicted?.[strategy];
           ownPredictions.get(strategy)!.set(service, strategyShares ? strategyShares.map(
@@ -135,6 +144,12 @@ export default class MLScalingHandler {
       const count = endpoints.reduce((sum, e) => sum + (metrics?.getEntryPointRequestCount(e) ?? 0), 0);
       return daily > 0 ? count / daily * PERCENT : 0;
     });
+  }
+
+  // uniqueServiceName is "name	namespace	version"
+  private displayName(service: string): string {
+    const [name, namespace, version] = service.split("	");
+    return `${name}.${namespace} (${version})`;
   }
 
   // A negative share is a model artefact, not demand.

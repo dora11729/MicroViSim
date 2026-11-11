@@ -21,6 +21,7 @@ import { RealtimeDataList } from "../../classes/RealtimeDataList";
 import { CEndpointDependencies } from "../../classes/Cacheable/CEndpointDependencies";
 import Logger from "../../utils/Logger";
 import { TPredictionComparison } from "../entities/TPredictionComparison";
+import { ISimulationProgress, NoProgress } from "../entities/TSimulationProgress";
 
 type TBaseRealtimeData = Omit<
   TRealtimeData,
@@ -37,7 +38,11 @@ export default class Simulator {
   static getInstance = () => this.instance || (this.instance = new this());
   private constructor() { };
 
-  async generateSimulationDataFromConfig(configYamlString: string, simulateDate: number): Promise<{
+  async generateSimulationDataFromConfig(
+    configYamlString: string,
+    simulateDate: number,
+    progress: ISimulationProgress = NoProgress
+  ): Promise<{
     validationErrorMessage: string; // error message when validating YAML format
     convertingErrorMessage: string; // error message when converting to realtime data
     endpointDependencies: TEndpointDependency[];
@@ -100,7 +105,8 @@ export default class Simulator {
           dependOnMapWithCallProbability,
           basicReplicaCountList,
           EndpointRealTimeBaseDatas,
-          simulateDate
+          simulateDate,
+          progress
         )
 
       realtimeCombinedDataPerTimeSlotMap = metricsMap.realtimeCombinedDataPerTimeSlotMap;
