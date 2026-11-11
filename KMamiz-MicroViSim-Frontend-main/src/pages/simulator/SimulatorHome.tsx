@@ -23,9 +23,7 @@ import { isRunning, TSimulationJobStatus } from "../../entities/TSimulationJob";
 const SwalHandler = withReactContent(Swal);
 const STATUS_POLL_MS = 1500;
 const splitErrorLines = (message: string) =>
-  message.split('
----
-').map(line => line.trim()).filter(line => line.length > 0);
+  message.split('\n---\n').map(line => line.trim()).filter(line => line.length > 0);
 
 const useStyles = makeStyles(() => ({
   container: {
