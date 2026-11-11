@@ -18,7 +18,7 @@ import Swal from 'sweetalert2'
 import withReactContent from 'sweetalert2-react-content'
 import { useNavigate } from "react-router-dom";
 import SimulationProgress from "../../components/SimulationProgress";
-import { isRunning, justStartedStatus, TSimulationJobStatus } from "../../entities/TSimulationJob";
+import { cancellingStatus, isRunning, justStartedStatus, TSimulationJobStatus } from "../../entities/TSimulationJob";
 
 const SwalHandler = withReactContent(Swal);
 const STATUS_POLL_MS = 1500;
@@ -115,6 +115,8 @@ export default function SimulatorHome() {
   const previousJobState = useRef<string | null>(null);
   const submittedYaml = useRef<string | null>(null);
   const latestStatusRequest = useRef(0);
+  // While a cancel is on its way, a poll sent just before it still says "running".
+  const cancelPending = useRef(false);
 
   // create new version tag
   const latestVersionStr = "Latest";
@@ -153,7 +155,7 @@ export default function SimulatorHome() {
     const status = await SimulationService.getInstance().getSimulationStatus();
     // A later request may have answered first; an older status would step the page back.
     if (request !== latestStatusRequest.current) return;
-    if (status) {
+    if (status && !(cancelPending.current && status.state === "running")) {
       if (awaitingRun.current) {
         const { previousStartedAt } = awaitingRun.current;
         if (status.startedAt === null || status.startedAt === previousStartedAt) return;
@@ -286,10 +288,14 @@ export default function SimulatorHome() {
     });
     if (!result.isConfirmed) return;
 
+    cancelPending.current = true;
+    setJobStatus(status => (status && isRunning(status) ? cancellingStatus(status) : status));
     const { accepted, message } = await SimulationService.getInstance().cancelSimulation();
+    cancelPending.current = false;
     if (!accepted) {
       await SwalHandler.fire({ icon: 'error', title: 'Could not cancel', text: message });
     }
+    // Refused, this puts back the real state, e.g. saving.
     await refreshJobStatus();
   };
 

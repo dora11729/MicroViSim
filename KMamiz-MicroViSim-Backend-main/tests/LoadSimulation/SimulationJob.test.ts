@@ -83,6 +83,8 @@ describe("SimulationJobManager", () => {
 
     expect(manager.cancel()).toBe("cancelling");
     expect(job.progress().signal.aborted).toBe(true);
+    expect(manager.status()).toMatchObject({ state: "cancelling", cancellable: false });
+    expect(manager.status().cancelRequestedAt).toEqual(expect.any(Number));
     expect(() => job.progress().stage("simulatingLoadEffects")).toThrow("cancelled");
 
     job.finish(new Error("aborted"));

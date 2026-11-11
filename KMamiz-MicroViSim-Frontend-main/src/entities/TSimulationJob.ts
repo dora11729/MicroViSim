@@ -30,6 +30,7 @@ export type TSimulationJobStatus = {
   error: string | null;   // "\n---\n" separates its parts
   startedAt: number | null;
   finishedAt: number | null;
+  cancelRequestedAt: number | null;  // the run itself stops at its next stage
   cancellable: boolean;
 };
 
@@ -46,7 +47,16 @@ export const justStartedStatus = (): TSimulationJobStatus => ({
   error: null,
   startedAt: Date.now(),
   finishedAt: null,
+  cancelRequestedAt: null,
   cancellable: true,
+});
+
+// Shown the moment the user cancels: the backend may only answer after its current step.
+export const cancellingStatus = (status: TSimulationJobStatus): TSimulationJobStatus => ({
+  ...status,
+  state: "cancelling",
+  cancelRequestedAt: status.cancelRequestedAt ?? Date.now(),
+  cancellable: false,
 });
 
 export const isRunning = (status?: TSimulationJobStatus | null) =>

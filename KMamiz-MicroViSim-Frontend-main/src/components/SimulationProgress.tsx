@@ -79,15 +79,19 @@ export default function SimulationProgress({
   onCancel: () => void;
 }) {
   const running = isRunning(status);
+  const cancelled = status.state === "cancelling" || status.state === "cancelled";
   const [now, setNow] = useState(Date.now());
 
+  // The clock stops once the user cancels, though the run may take a moment to stop.
+  const ticking = status.state === "running";
   useEffect(() => {
-    if (!running) return;
+    if (!ticking) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [running]);
+  }, [ticking]);
 
-  const elapsed = status.startedAt ? (status.finishedAt ?? now) - status.startedAt : 0;
+  const end = status.cancelRequestedAt ?? status.finishedAt ?? now;
+  const elapsed = status.startedAt ? end - status.startedAt : 0;
   const activeStage = status.stages.find(s => s.status === "active")?.stage;
   const failedStage = status.stages.find(s => s.status === "failed")?.stage;
   const training = status.training;
@@ -102,7 +106,7 @@ export default function SimulationProgress({
               : status.state === "failed" ? "Simulation failed"
                 : "Simulation cancelled"}
           <Typography component="span" variant="body2" color="text.secondary" style={{ marginLeft: 12 }}>
-            {running ? "elapsed" : "took"} {formatDuration(elapsed)}
+            {cancelled ? "cancelled after" : running ? "elapsed" : "took"} {formatDuration(elapsed)}
           </Typography>
         </Typography>
         {running && (
@@ -134,7 +138,12 @@ export default function SimulationProgress({
         ))}
       </Stepper>
 
-      {running && activeStage && (
+      {status.state === "cancelling" && (
+        <Typography variant="body2" style={{ marginTop: 16 }}>
+          Stopping: model training stops at once; other steps finish the calculation in hand first.
+        </Typography>
+      )}
+      {status.state === "running" && activeStage && (
         <Box style={{ marginTop: 16 }}>
           <Typography variant="body2">
             {STAGE_LABELS[activeStage]}{status.detail ? `: ${status.detail}` : ""}

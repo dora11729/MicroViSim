@@ -18,6 +18,8 @@ export type TSimulationJobStatus = {
   error: string | null;                  // when failed; "\n---\n" separates its parts
   startedAt: number | null;              // epoch ms
   finishedAt: number | null;
+  // When the user asked to cancel; the run itself stops only at its next stage.
+  cancelRequestedAt: number | null;
   cancellable: boolean;
 };
 
@@ -31,6 +33,7 @@ class SimulationJob implements ISimulationProgress {
   private error: string | null = null;
   private readonly startedAt = Date.now();
   private finishedAt: number | null = null;
+  private cancelRequestedAt: number | null = null;
 
   get signal() {
     return this.controller.signal;
@@ -71,6 +74,7 @@ class SimulationJob implements ISimulationProgress {
 
   cancel() {
     this.state = "cancelling";
+    this.cancelRequestedAt = Date.now();
     this.controller.abort();
   }
 
@@ -103,6 +107,7 @@ class SimulationJob implements ISimulationProgress {
       error: this.error,
       startedAt: this.startedAt,
       finishedAt: this.finishedAt,
+      cancelRequestedAt: this.cancelRequestedAt,
       cancellable: this.cancellable,
     };
   }
@@ -156,6 +161,7 @@ export default class SimulationJobManager {
       error: null,
       startedAt: null,
       finishedAt: null,
+      cancelRequestedAt: null,
       cancellable: false,
     };
   }
