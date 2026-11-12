@@ -1,11 +1,11 @@
-import { multiStepForecasts } from "../../entities/TSimConfigLoadSimulation";
+import { TForecastGranularity } from "../../entities/TSimConfigLoadSimulation";
 import {
   TPredictionComparison,
   TPredictionError,
   TServicePredictionComparison,
 } from "../../entities/TPredictionComparison";
-import { MLModelType, TMultiStepForecast } from "./MLModelClient";
-import { TPredictedLoadsByStrategy } from "./MLScalingHandler";
+import { MLModelType } from "./MLModelClient";
+import { comparedForecasts, TForecastPlan } from "./MLScalingHandler";
 import Utils from "../../../utils/Utils";
 
 const SECONDS_PER_HOUR = 3600;
@@ -23,12 +23,12 @@ export default class PredictionComparisonBuilder {
     sortedTimeSlotKeys: string[];
     simulateDate: number;
     modelServices: Map<string, MLModelType>;
-    predictedLoads: TPredictedLoadsByStrategy;
+    forecastPlan: TForecastPlan;
     serviceRequestCounts: Map<string, Map<string, number>>;   // slot -> service -> requests
-    configuredMethod: TMultiStepForecast;
+    configuredMethod: TForecastGranularity;
   }): TPredictionComparison {
-    const { sortedTimeSlotKeys, predictedLoads, serviceRequestCounts } = input;
-    const methods = [NAIVE, ...multiStepForecasts];
+    const { sortedTimeSlotKeys, forecastPlan, serviceRequestCounts } = input;
+    const methods = [NAIVE, ...comparedForecasts];
 
     const services = Array.from(input.modelServices.entries())
       .sort(([a], [b]) => a.localeCompare(b))
@@ -37,9 +37,9 @@ export default class PredictionComparisonBuilder {
         const predictions: Record<string, (number | null)[]> = {
           [NAIVE]: actual.map((_, j) => (j === 0 ? null : actual[j - 1])),
         };
-        for (const method of multiStepForecasts) {
+        for (const method of comparedForecasts) {
           predictions[method] = sortedTimeSlotKeys.map(slot => {
-            const load = predictedLoads.get(method)?.get(slot)?.get(uniqueServiceName);
+            const load = forecastPlan.loads.get(method)?.get(slot)?.get(uniqueServiceName);
             return load?.status === "ok" ? load.rps * SECONDS_PER_HOUR : null;
           });
         }
@@ -58,6 +58,7 @@ export default class PredictionComparisonBuilder {
         return {
           uniqueServiceName, service, namespace, version, model,
           actual, predictions, errors, scoredSlots: scored.length,
+          minuteChoice: forecastPlan.minuteChoices.get(uniqueServiceName) ?? null,
         };
       });
 

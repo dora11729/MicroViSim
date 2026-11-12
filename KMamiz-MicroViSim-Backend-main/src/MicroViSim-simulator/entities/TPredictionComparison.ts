@@ -20,11 +20,14 @@ export type TServicePredictionComparison = {
   // Over the slots every method forecast, so the methods are scored on the same hours.
   errors: Record<string, TPredictionError>;
   scoredSlots: number;
+  // Which strategy the "minute" forecast used for each date; null for services that have
+  // no model of their own and are forecast through their callers.
+  minuteChoice: (string | null)[] | null;
 };
 
 export type TPredictionComparison = {
   dates: number[];            // epoch ms, the same x values as the Metrics charts
   methods: string[];          // "naive" first
-  configuredMethod: string;   // the one that drove scaling
+  configuredMethod: string;   // the one that drove scaling: "minute" or "hourly"
   services: TServicePredictionComparison[];
 };

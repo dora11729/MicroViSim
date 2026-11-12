@@ -20,7 +20,7 @@ import LoadSimulationPropagator from "./LoadSimulationPropagator";
 import FaultInjector from "./FaultInjector";
 import OverloadErrorRateAndLatencyEstimator from "./OverloadErrorRateAndLatencyEstimator";
 import SimulatorUtils from "../SimulatorUtils";
-import MLScalingHandler, { TPredictedLoadsByStrategy } from "./MLScalingHandler";
+import MLScalingHandler, { TForecastPlan } from "./MLScalingHandler";
 import { TMLFallbackReason } from "./PredictedLoadPropagator";
 import PredictionComparisonBuilder from "./PredictionComparisonBuilder";
 import { TPredictionComparison } from "../../entities/TPredictionComparison";
@@ -102,7 +102,7 @@ export default class LoadSimulationHandler {
     );
 
     // Apply auto-scaling decisions based on basic error rate propagation
-    const predictedLoads = await this.applyAutoScalingForTimeSlot(
+    const forecastPlan = await this.applyAutoScalingForTimeSlot(
       loadSimulationSettings,
       dependOnMapWithCallProbability,
       propagationResultsWithBasicError,
@@ -144,9 +144,9 @@ export default class LoadSimulationHandler {
       sortedTimeSlotKeys: this.sortedTimeSlotKeys(metricsPerTimeSlotMap),
       simulateDate,
       modelServices: this.mlScalingHandler.modelServices(loadSimulationSettings.serviceMetrics),
-      predictedLoads,
+      forecastPlan,
       serviceRequestCounts: this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithOverloadError),
-      configuredMethod: loadSimulationSettings.config.multiStepForecast,
+      configuredMethod: loadSimulationSettings.config.forecastGranularity,
     });
 
     progress.stage("generatingMetrics");
@@ -481,8 +481,8 @@ export default class LoadSimulationHandler {
       no model => reactive HPA, the naive "next RPS = last RPS"
       model    => predicted RPS: the service's own share-of-day model plus whatever
                   predicted load its callers pass down (MLScalingHandler), by the
-                  configured multiStepForecast
-    Returns every strategy's predictions, for comparing them after the run.
+                  configured forecastGranularity
+    Returns every forecast, for comparing them after the run.
   */
   private async applyAutoScalingForTimeSlot(
     loadSimulationSettings: TLoadSimulationSettings,
@@ -490,12 +490,12 @@ export default class LoadSimulationHandler {
     propagationResultsWithBasicError: Map<string, Map<string, TEndpointPropagationStatsForOneTimeSlot>>,
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>,
     progress: ISimulationProgress = NoProgress,
-  ): Promise<TPredictedLoadsByStrategy> {
+  ): Promise<TForecastPlan> {
     const serviceMetrics = loadSimulationSettings.serviceMetrics;
     const serviceReceivedRequestCount = this.computeRequestCountsPerServicePerTimeSlot(propagationResultsWithBasicError);
     const sortedTimeSlotKeys = this.sortedTimeSlotKeys(metricsPerTimeSlotMap);
 
-    const predictedLoadsByStrategy = await this.mlScalingHandler.planPredictedLoads({
+    const forecastPlan = await this.mlScalingHandler.planPredictedLoads({
       serviceMetrics,
       endpointMetrics: loadSimulationSettings.endpointMetrics,
       dependOnMap: dependOnMapWithCallProbability,
@@ -505,7 +505,7 @@ export default class LoadSimulationHandler {
     });
     progress.stage("simulatingLoadEffects", "Scaling replicas");
     await yieldToEventLoop();
-    const predictedLoads = predictedLoadsByStrategy.get(loadSimulationSettings.config.multiStepForecast) ?? new Map();
+    const predictedLoads = forecastPlan.loads.get(loadSimulationSettings.config.forecastGranularity) ?? new Map();
 
     // ns: namespace
     const dataset = [];
@@ -624,7 +624,7 @@ export default class LoadSimulationHandler {
     accuracyTracker.report();
     this.reportMLFallbacks(fallbackCounts);
     console.dir(dataset, { depth: null, maxArrayLength: null });
-    return predictedLoadsByStrategy;
+    return forecastPlan;
   }
 
   private recordFallback(

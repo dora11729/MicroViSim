@@ -2,9 +2,9 @@ import numpy as np
 import pytest
 
 from services import forecasters
-from services.forecasters import (MINUTES_PER_HOUR, WINDOW, block_totals, extended_line,
-                                  hour_start_samples, last_two_hours, linear_input_forecast, make_windows,
-                                  minute_shares, predict, recursive_forecast, recursive_path, train)
+from services.forecasters import (MINUTES_PER_HOUR, WINDOW, extended_line, hour_start_samples,
+                                  linear_input_forecast, make_windows, minute_shares, predict,
+                                  recursive_path, train)
 
 
 def periodic_minutes(days: int, seed: int = 0) -> np.ndarray:
@@ -52,12 +52,6 @@ def test_clips_the_carried_line_at_zero():
     assert extended_line(np.array([10.0, 1.0]), 2).min() == 0
 
 
-def test_feeds_its_own_forecasts_back_when_recursive():
-    windows = np.array([np.arange(WINDOW, dtype=float)])
-    # Repeating the newest input keeps forecasting the last observed minute.
-    np.testing.assert_allclose(recursive_forecast(last_input, windows), [MINUTES_PER_HOUR * (WINDOW - 1)])
-
-
 def test_keeps_every_recursive_minute():
     windows = np.array([np.arange(WINDOW, dtype=float)])
     np.testing.assert_allclose(recursive_path(last_input, windows), np.full((1, MINUTES_PER_HOUR), WINDOW - 1))
@@ -75,27 +69,6 @@ def test_rejects_a_series_of_partial_hours():
         hour_start_samples(np.zeros(MINUTES_PER_HOUR + 1))
 
 
-def test_totals_each_ten_minute_block():
-    np.testing.assert_array_equal(block_totals(np.arange(60.0)[np.newaxis]),
-                                  [[45, 145, 245, 345, 445, 545]])
-
-
-def test_regresses_on_the_last_two_hours_repeating_hour_zero():
-    np.testing.assert_array_equal(last_two_hours(np.array([4.0, 5.0, 6.0]), range(1, 3)),
-                                  [[1, 4, 4], [1, 5, 4]])
-
-
-def test_recovers_a_linear_rule_for_each_block_with_arima_direct(tmp_path):
-    rng = np.random.default_rng(0)
-    hourly = rng.uniform(1, 10, 200)
-    # Every block of hour t is 0.1 + 0.05 H_{t-1} + 0.02 H_{t-2}.
-    blocks = last_two_hours(hourly, range(1, 200)) @ np.array([0.1, 0.05, 0.02])
-    truth = np.repeat(blocks / 10, 60).reshape(-1, 60)
-    forecasters._train_direct("arima", tmp_path, hourly, truth)
-    predicted = forecasters._predict_direct("arima", tmp_path, hourly, range(1, 200), None)
-    np.testing.assert_allclose(predicted, 6 * blocks)
-
-
 def test_reads_the_carried_line_as_input_when_linear():
     windows = np.array([np.zeros(WINDOW)])
     lines = np.array([np.arange(1, MINUTES_PER_HOUR + 1, dtype=float)])
@@ -104,7 +77,7 @@ def test_reads_the_carried_line_as_input_when_linear():
                                [sum(range(MINUTES_PER_HOUR))])
 
 
-@pytest.mark.parametrize("multi_step", ["recursive", "linearInput", "rectify", "direct", "hourly"])
+@pytest.mark.parametrize("multi_step", ["linearInput", "rectify", "hourly"])
 def test_arima_builds_each_hour_from_earlier_hours_only(tmp_path, monkeypatch, multi_step):
     pytest.importorskip("statsmodels")
     monkeypatch.setattr(forecasters, "MAX_PQ", 1)

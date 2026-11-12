@@ -1,5 +1,4 @@
 import axios from "axios";
-import { multiStepForecasts } from "../../entities/TSimConfigLoadSimulation";
 import {
   ISimulationProgress,
   NoProgress,
@@ -13,7 +12,10 @@ const LEFTOVER_STOP_TIMEOUT_MS = 30_000;
 const LEFTOVER_POLL_MS = 500;
 
 export type MLModelType = "arima" | "bilstm" | "gru";
-export type TMultiStepForecast = typeof multiStepForecasts[number];
+
+// The ML service's forecasting strategies (see its forecasters.py), all fetched at once.
+export const mlForecastStrategies = ["linearInput", "rectify", "hourly"] as const;
+export type TMLForecastStrategy = typeof mlForecastStrategies[number];
 
 export type TMLTrainingService = {
   service: string;            // uniqueServiceName
@@ -84,9 +86,9 @@ export default class MLModelClient {
     service: string,
     model: MLModelType,
     shares: number[],
-    multiSteps: readonly TMultiStepForecast[],
+    multiSteps: readonly TMLForecastStrategy[],
     signal?: AbortSignal
-  ): Promise<Record<TMultiStepForecast, (number | null)[]> | null> {
+  ): Promise<Record<TMLForecastStrategy, (number | null)[]> | null> {
     try {
       const res = await fetch(`${this.baseUrl}/predict`, {
         method: "POST",
@@ -98,7 +100,7 @@ export default class MLModelClient {
         console.error(`[MLModelClient] predict failed: ${model} for ${service} returned HTTP ${res.status}`);
         return null;
       }
-      return ((await res.json()) as { predictions: Record<TMultiStepForecast, (number | null)[]> }).predictions;
+      return ((await res.json()) as { predictions: Record<TMLForecastStrategy, (number | null)[]> }).predictions;
     } catch (e) {
       if (signal?.aborted) throw new SimulationCancelledError();
       console.error("[MLModelClient] predict failed:", e);

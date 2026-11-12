@@ -2,8 +2,9 @@ import MLModelClient, { MLModelType } from "../../src/MicroViSim-simulator/class
 import MLScalingHandler from "../../src/MicroViSim-simulator/classes/LoadSimulation/MLScalingHandler";
 import SimulatorUtils from "../../src/MicroViSim-simulator/classes/SimulatorUtils";
 import { TCMetricsPerTimeSlot } from "../../src/MicroViSim-simulator/entities/TLoadSimulation";
+import { comparedForecasts } from "../../src/MicroViSim-simulator/classes/LoadSimulation/MLScalingHandler";
+import { mlForecastStrategies } from "../../src/MicroViSim-simulator/classes/LoadSimulation/MLModelClient";
 import {
-  multiStepForecasts,
   TSimulationEndpointMetric,
   TSimulationNamespaceServiceMetrics,
 } from "../../src/MicroViSim-simulator/entities/TSimConfigLoadSimulation";
@@ -94,7 +95,7 @@ describe("MLScalingHandler", () => {
 
   it("stays off the ML service when no service names a model", async () => {
     const train = jest.spyOn(client, "train");
-    const table = await handler.planPredictedLoads({
+    const plan = await handler.planPredictedLoads({
       serviceMetrics: mockServiceMetrics({ [Gateway]: undefined }),
       endpointMetrics: mockEndpointMetrics({ [GatewayApi]: 4000 }),
       dependOnMap: new Map(),
@@ -102,17 +103,16 @@ describe("MLScalingHandler", () => {
       sortedTimeSlotKeys: Slots,
     });
     expect(train).not.toHaveBeenCalled();
-    expect(table.size).toBe(0);
+    expect(plan.loads.size).toBe(0);
   });
 
-  it("predicts each trained service from its observed shares, by every strategy", async () => {
+  it("predicts each trained service from its observed shares, by every forecast", async () => {
     jest.spyOn(client, "train").mockResolvedValue();
     const predictShares = jest.spyOn(client, "predictShares").mockResolvedValue({
-      recursive: [null, 10, 20], linearInput: [null, 1, 2], rectify: [null, 3, 4], direct: [null, 5, 6],
-      hourly: [null, null, 7],
+      linearInput: [null, 1, 9], rectify: [null, 2, 8], hourly: [null, null, 7],
     });
 
-    const table = await handler.planPredictedLoads({
+    const plan = await handler.planPredictedLoads({
       serviceMetrics: mockServiceMetrics({ [Gateway]: "bilstm" }),
       endpointMetrics: mockEndpointMetrics({ [GatewayApi]: 360000 }),
       dependOnMap: new Map(),
@@ -120,11 +120,14 @@ describe("MLScalingHandler", () => {
       sortedTimeSlotKeys: Slots,
     });
 
-    expect(predictShares).toHaveBeenCalledWith(Gateway, "bilstm", [1, 2, 0], multiStepForecasts, expect.anything());
-    expect(Array.from(table.keys())).toEqual(multiStepForecasts);
-    expect(table.get("recursive")!.get(Slots[2])!.get(Gateway)).toEqual({ status: "ok", rps: 20 });
-    expect(table.get("direct")!.get(Slots[1])!.get(Gateway)).toEqual({ status: "ok", rps: 5 });
-    expect(table.get("hourly")!.get(Slots[1])!.get(Gateway)).toEqual({ status: "fallback", reason: "insufficientHistory" });
-    expect(table.get("hourly")!.get(Slots[2])!.get(Gateway)).toEqual({ status: "ok", rps: 7 });
+    expect(predictShares).toHaveBeenCalledWith(Gateway, "bilstm", [1, 2, 0], mlForecastStrategies, expect.anything());
+    expect(Array.from(plan.loads.keys())).toEqual(comparedForecasts);
+    expect(plan.loads.get("rectify")!.get(Slots[2])!.get(Gateway)).toEqual({ status: "ok", rps: 8 });
+    expect(plan.loads.get("hourly")!.get(Slots[1])!.get(Gateway)).toEqual({ status: "fallback", reason: "insufficientHistory" });
+    expect(plan.loads.get("hourly")!.get(Slots[2])!.get(Gateway)).toEqual({ status: "ok", rps: 7 });
+    // Slot 1 has no past to compare, so linearInput; by slot 2, rectify was right about slot 1 (2).
+    expect(plan.minuteChoices.get(Gateway)).toEqual([null, "linearInput", "rectify"]);
+    expect(plan.loads.get("minute")!.get(Slots[1])!.get(Gateway)).toEqual({ status: "ok", rps: 1 });
+    expect(plan.loads.get("minute")!.get(Slots[2])!.get(Gateway)).toEqual({ status: "ok", rps: 8 });
   });
 });

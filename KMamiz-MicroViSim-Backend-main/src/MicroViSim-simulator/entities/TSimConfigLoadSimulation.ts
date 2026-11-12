@@ -15,14 +15,11 @@ import { z } from "zod";
 
 const HOURS_PER_DAY = 24;
 
-// How the one-minute ML models forecast an hour:
-// - recursive: minutes 2..60 are fed the model's own predictions
-// - linearInput: minutes 2..60 are fed the last hour's trend line carried on
-// - rectify: recursive, plus a kNN estimate of its hourly error
-// - direct: six models, each forecasting one 10-minute block's total
-// - hourly: no minutes; a model trained on hourly shares, kept as a baseline
-// Every one of them is forecast and compared in each run; this picks the one that scales.
-export const multiStepForecasts = ["recursive", "linearInput", "rectify", "direct", "hourly"] as const;
+// Which models drive model-based scaling. Both are forecast and compared in every run.
+// - minute: one-minute models; each hour, whichever of linearInput and rectify was
+//   closer over the last 24 hours (MinuteForecastSelector)
+// - hourly: models trained on hourly shares
+export const forecastGranularities = ["minute", "hourly"] as const;
 
 // The recurring, every-day shape of the incoming traffic.
 const trafficPatternSchema = z.object({
@@ -87,9 +84,9 @@ export const loadSimulationConfigSchema = z.object({
     .int({ message: "randomSeed must be an integer." })
     .optional(),
   trafficPattern: trafficPatternSchema.default({}),
-  multiStepForecast: z.enum(multiStepForecasts, {
-    message: "multiStepForecast must be one of 'recursive', 'linearInput', 'rectify', 'direct' or 'hourly'.",
-  }).default("recursive"),
+  forecastGranularity: z.enum(forecastGranularities, {
+    message: "forecastGranularity must be 'minute' or 'hourly'.",
+  }).default("hourly"),
   // TODO: May expand with additional config options such as chaosMonkeyEnabled, errorRateAmplificationFactor, etc^_^.
 }).strict().default({
   simulationDurationInDays: 1,
@@ -251,6 +248,7 @@ export const loadSimulationSchema = z.object({
 
 /**** Schema to type ****/
 export type TFallbackStrategy = typeof fallbackStrategies[number];
+export type TForecastGranularity = typeof forecastGranularities[number];
 export type TSimulationTrafficPattern = z.infer<typeof trafficPatternSchema>;
 export type TLoadSimulationConfig = z.infer<typeof loadSimulationConfigSchema>;
 export type TSimulationServiceVersionScalingSchema = z.infer<typeof simulationServiceVersionScalingSchema>;

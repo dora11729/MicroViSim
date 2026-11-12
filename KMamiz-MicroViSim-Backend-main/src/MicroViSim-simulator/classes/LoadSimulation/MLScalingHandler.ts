@@ -1,8 +1,8 @@
-import MLModelClient, { MLModelType, TMLTrainingService, TMultiStepForecast } from "./MLModelClient";
+import MLModelClient, { MLModelType, mlForecastStrategies, TMLTrainingService } from "./MLModelClient";
+import MinuteForecastSelector, { TMinuteStrategy } from "./MinuteForecastSelector";
 import PredictedLoadPropagator, { TPredictedServiceLoad, TServiceTrafficProfile } from "./PredictedLoadPropagator";
 import SimulatorUtils from "../SimulatorUtils";
 import {
-  multiStepForecasts,
   TSimulationEndpointMetric,
   TSimulationNamespaceServiceMetrics,
 } from "../../entities/TSimConfigLoadSimulation";
@@ -15,8 +15,19 @@ import { ISimulationProgress, NoProgress } from "../../entities/TSimulationProgr
 const SECONDS_PER_HOUR = 3600;
 const PERCENT = 100;
 
-// strategy -> slot -> uniqueServiceName -> predicted load
-export type TPredictedLoadsByStrategy = Map<TMultiStepForecast, Map<string, Map<string, TPredictedServiceLoad>>>;
+// Every forecast a run compares: the ML service's strategies, plus "minute", picked hour by
+// hour between linearInput and rectify. forecastGranularity names the one that scales.
+export const comparedForecasts = ["linearInput", "rectify", "minute", "hourly"] as const;
+export type TComparedForecast = typeof comparedForecasts[number];
+
+// forecast -> slot -> uniqueServiceName -> predicted load
+export type TPredictedLoadsByStrategy = Map<TComparedForecast, Map<string, Map<string, TPredictedServiceLoad>>>;
+
+export type TForecastPlan = {
+  loads: TPredictedLoadsByStrategy;
+  // Per trained service, the strategy "minute" used for each slot.
+  minuteChoices: Map<string, (TMinuteStrategy | null)[]>;
+};
 
 /*
   Models predict each hour's share of the day's traffic (percent), per service, so a
@@ -29,6 +40,7 @@ export default class MLScalingHandler {
 
   private mlClient: MLModelClient;
   private propagator = new PredictedLoadPropagator();
+  private minuteSelector = new MinuteForecastSelector();
 
   private constructor() {
     this.mlClient = MLModelClient.getInstance();
@@ -36,7 +48,7 @@ export default class MLScalingHandler {
 
   /*
     Predicted RPS per slot for every service whose autoScaling names a model, by every
-    multi-step strategy so a run can compare them. Nothing here depends on scaling
+    forecast a run compares. Nothing here depends on scaling
     decisions, so the whole table is built before the scaling loop runs. Throws if
     training fails.
   */
@@ -47,16 +59,17 @@ export default class MLScalingHandler {
     metricsPerTimeSlotMap: Map<string, TCMetricsPerTimeSlot>;
     sortedTimeSlotKeys: string[];
     progress?: ISimulationProgress;
-  }): Promise<TPredictedLoadsByStrategy> {
+  }): Promise<TForecastPlan> {
     const progress = input.progress ?? NoProgress;
+    const minuteChoices = new Map<string, (TMinuteStrategy | null)[]>();
     const modelServices = this.modelServices(input.serviceMetrics);
-    if (modelServices.size === 0) return new Map();
+    if (modelServices.size === 0) return { loads: new Map(), minuteChoices };
 
     const profile = this.buildTrafficProfile(input.endpointMetrics);
     const training = this.trainingServices(profile, modelServices);
-    // strategy -> service -> predicted external RPS per slot, or null if the ML service failed
-    const ownPredictions = new Map(multiStepForecasts.map(
-      strategy => [strategy, new Map<string, (number | null)[] | null>()]
+    // forecast -> service -> predicted external RPS per slot, or null if the ML service failed
+    const ownPredictions = new Map(comparedForecasts.map(
+      forecast => [forecast, new Map<string, (number | null)[] | null>()]
     ));
 
     if (training.length > 0) {
@@ -66,27 +79,40 @@ export default class MLScalingHandler {
         progress.stage("simulatingLoadEffects",
           `Forecasting load: ${this.displayName(service)} (${model}), ${i + 1}/${training.length}`);
         const shares = this.observedShares(service, profile, input.sortedTimeSlotKeys, input.metricsPerTimeSlotMap);
-        const predicted = await this.mlClient.predictShares(service, model, shares, multiStepForecasts, progress.signal);
+        const predicted = await this.mlClient.predictShares(service, model, shares, mlForecastStrategies, progress.signal);
         if (!predicted) {
           progress.warn(`Prediction failed for ${this.displayName(service)} (${model}); it scales by the last hour's traffic instead.`);
         }
-        for (const strategy of multiStepForecasts) {
-          const strategyShares = predicted?.[strategy];
-          ownPredictions.get(strategy)!.set(service, strategyShares ? strategyShares.map(
+
+        // Picked on the shares the models forecast directly, which scaling does not affect.
+        const minute = predicted?.linearInput && predicted?.rectify
+          ? this.minuteSelector.select(shares, { linearInput: predicted.linearInput, rectify: predicted.rectify })
+          : null;
+        if (minute) minuteChoices.set(service, minute.chosen);
+        const sharesByForecast: Record<TComparedForecast, (number | null)[] | undefined> = {
+          linearInput: predicted?.linearInput,
+          rectify: predicted?.rectify,
+          minute: minute?.shares,
+          hourly: predicted?.hourly,
+        };
+        for (const forecast of comparedForecasts) {
+          const forecastShares = sharesByForecast[forecast];
+          ownPredictions.get(forecast)!.set(service, forecastShares ? forecastShares.map(
             share => share === null ? null : this.shareToRPS(share, dailyRequestCount)
           ) : null);
         }
       }
     }
 
-    return new Map(multiStepForecasts.map(strategy => [strategy, this.propagator.propagate({
+    const loads: TPredictedLoadsByStrategy = new Map(comparedForecasts.map(forecast => [forecast, this.propagator.propagate({
       sortedTimeSlotKeys: input.sortedTimeSlotKeys,
       profile,
       dependOnMap: input.dependOnMap,
       metricsPerTimeSlotMap: input.metricsPerTimeSlotMap,
-      ownPredictions: ownPredictions.get(strategy)!,
+      ownPredictions: ownPredictions.get(forecast)!,
       modelServices: Array.from(modelServices.keys()),
     })]));
+    return { loads, minuteChoices };
   }
 
   buildTrafficProfile(endpointMetrics: TSimulationEndpointMetric[]): TServiceTrafficProfile {

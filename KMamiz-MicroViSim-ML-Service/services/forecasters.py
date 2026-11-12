@@ -6,17 +6,14 @@ no normalisation (the target is already a percentage).
 Each model is trained on a one-minute percent-of-day series and predicts one minute
 ahead. The simulation only observes hourly shares, so predict():
   1. spreads every observed hour over its minutes along a straight line (minute_shares),
-  2. forecasts the next hour with one of four strategies:
-     - "recursive":   60 one-minute steps, each fed the model's own earlier predictions
+  2. forecasts the next hour with one of two strategies:
      - "linearInput": 60 one-minute steps, each fed the line carried on into the hour
-     - "rectify":     the recursive total plus a kNN estimate of its error (knn.py)
-     - "direct":      six models, each forecasting one 10-minute block's total; for
-                      ARIMA, a linear regression on the last two hours
-  3. sums those minutes or blocks into the hour's share.
-"hourly" skips the minutes: a model trained on hourly shares (hourly_forecasters.py),
-kept as a baseline for the four above.
-rectify and direct are trained on samples starting on the hour, with interpolated inputs,
-as predict() sees them. Parameters stay frozen, and hour t is built from hours 0..t-1 only.
+     - "rectify":     60 one-minute steps fed back as inputs (recursive), totalled,
+                      plus a kNN estimate of that total's error (knn.py)
+  3. sums those minutes into the hour's share.
+"hourly" skips the minutes: a model trained on hourly shares (hourly_forecasters.py).
+rectify's kNN is trained on samples starting on the hour, with interpolated inputs, as
+predict() sees them. Parameters stay frozen, and hour t is built from hours 0..t-1 only.
 """
 
 from __future__ import annotations
@@ -32,13 +29,10 @@ import numpy as np
 from services import knn
 
 MODEL_TYPES = ("arima", "bilstm", "gru")
-MULTI_STEP = ("recursive", "linearInput", "rectify", "direct", "hourly")
+MULTI_STEP = ("linearInput", "rectify", "hourly")
 WINDOW = 10
 MINUTES_PER_HOUR = 60
 SEED = 42
-
-DIRECT_BLOCKS = 6
-BLOCK_MINUTES = MINUTES_PER_HOUR // DIRECT_BLOCKS
 
 # Interpolation: how much of the trend between the last two hours each line keeps
 TREND_STRENGTH = 0.5
@@ -66,8 +60,6 @@ META_FILE = "meta.json"
 ARTIFACT_FILE = {"arima": "arima.json", "bilstm": "bilstm.keras", "gru": "gru.keras"}
 RECTIFY_FILE = "rectify.npz"
 HOURLY_DIR = "hourly"
-DIRECT_FILES = {"arima": ["direct.npz"],
-                **{m: [f"direct_{b}.keras" for b in range(DIRECT_BLOCKS)] for m in ("bilstm", "gru")}}
 
 # Minute m's offset from its hour's midpoint, in hours: m = 0..59 is the hour the line
 # is fitted to, m = 60..119 the hour after it.
@@ -139,11 +131,6 @@ def hour_start_samples(series: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return hourly, series[MINUTES_PER_HOUR:].reshape(-1, MINUTES_PER_HOUR)
 
 
-def block_totals(minutes: np.ndarray) -> np.ndarray:
-    """(n, 60) minutes -> (n, DIRECT_BLOCKS) totals of each 10-minute block."""
-    return minutes.reshape(len(minutes), DIRECT_BLOCKS, BLOCK_MINUTES).sum(axis=2)
-
-
 def recursive_path(step: Step, windows: np.ndarray) -> np.ndarray:
     """60 one-minute forecasts, each fed back as the newest input; shape (n, 60)."""
     x = np.array(windows, float)
@@ -152,11 +139,6 @@ def recursive_path(step: Step, windows: np.ndarray) -> np.ndarray:
         path[:, j] = np.asarray(step(x), float)
         x = np.concatenate([x[:, 1:], path[:, j:j + 1]], axis=1)
     return path
-
-
-def recursive_forecast(step: Step, windows: np.ndarray) -> np.ndarray:
-    """Sum of 60 one-minute forecasts, each fed back as the newest input."""
-    return recursive_path(step, windows).sum(axis=1)
 
 
 def linear_input_forecast(step: Step, windows: np.ndarray, lines: np.ndarray) -> np.ndarray:
@@ -309,7 +291,7 @@ def _recurrent_linear_input(model_type: str, directory: Path, hourly: np.ndarray
     return linear_input_forecast(_recurrent_step(directory / ARTIFACT_FILE[model_type]), windows, lines)
 
 
-# ---------------------------------------------------------- rectify, direct --
+# ------------------------------------------------------------------ rectify --
 
 def _base_paths(model_type: str, directory: Path, minutes: np.ndarray, targets: range,
                 windows: np.ndarray) -> np.ndarray:
@@ -335,44 +317,9 @@ def _predict_rectify(model_type: str, directory: Path, minutes: np.ndarray, targ
     return base + knn.correct(windows, features, errors, k)
 
 
-def last_two_hours(hourly: np.ndarray, targets: range) -> np.ndarray:
-    """(1, H_{t-1}, H_{t-2}) per target hour: all an interpolated window carries, and,
-    unlike its 10 near-collinear minutes, a well-posed regression. Hour 1 repeats hour 0
-    for the missing hour -1, as hour 0's interpolation has no trend."""
-    return np.array([[1.0, hourly[t - 1], hourly[max(t - 2, 0)]] for t in targets])
-
-
-def _train_direct(model_type: str, directory: Path, hourly: np.ndarray, truth: np.ndarray) -> None:
-    _, targets, windows = _hour_starts(hourly)
-    y = block_totals(truth)
-    if model_type == "arima":
-        # ARIMA has no direct form; a least-squares AR(2) regression on the hours per block
-        # stands in for it.
-        coef, *_ = np.linalg.lstsq(last_two_hours(hourly, targets), y, rcond=None)
-        np.savez(directory / DIRECT_FILES["arima"][0], coef=coef.T)
-        return
-    x = windows[..., np.newaxis].astype("float32")
-    n_search = int(len(x) * BILSTM_TRAIN_RATIO)
-    for b, name in enumerate(DIRECT_FILES[model_type]):
-        target = y[:, b].astype("float32")
-        model, _ = _fit_recurrent(model_type, x, target, lambda: (x[:n_search], target[:n_search]))
-        model.save(directory / name)
-
-
-def _predict_direct(model_type: str, directory: Path, hourly: np.ndarray, targets: range,
-                    windows: np.ndarray) -> np.ndarray:
-    if model_type == "arima":
-        with np.load(directory / DIRECT_FILES["arima"][0]) as stored:
-            blocks = last_two_hours(hourly, targets) @ stored["coef"].T
-    else:
-        blocks = np.column_stack([_recurrent_step(directory / name)(windows)
-                                  for name in DIRECT_FILES[model_type]])
-    return blocks.sum(axis=1)
-
-
 # --------------------------------------------------------------------- API --
 
-TRAINING_STEPS = ("one-minute model", "rectify kNN", "direct models", "hourly model")
+TRAINING_STEPS = ("one-minute model", "rectify kNN", "hourly model")
 
 
 def train(model_type: str, series: np.ndarray, directory: Path,
@@ -393,8 +340,6 @@ def train(model_type: str, series: np.ndarray, directory: Path,
     on_step(TRAINING_STEPS[1])
     k = _train_rectify(model_type, directory, hourly, truth)
     on_step(TRAINING_STEPS[2])
-    _train_direct(model_type, directory, hourly, truth)
-    on_step(TRAINING_STEPS[3])
     from services import hourly_forecasters   # it imports this module
     hourly_forecasters.train(model_type, hourly, directory / HOURLY_DIR)
 
@@ -405,7 +350,7 @@ def train(model_type: str, series: np.ndarray, directory: Path,
 
 
 def predict(model_type: str, directory: Path, shares: list[float],
-            multi_step: str = "recursive") -> list[float | None]:
+            multi_step: str = "linearInput") -> list[float | None]:
     """Next-hour share for every hour of `shares`; None for hour 0, which has no past."""
     meta = json.loads((directory / META_FILE).read_text("utf-8"))
     if meta["model"] != model_type:
@@ -420,22 +365,18 @@ def predict(model_type: str, directory: Path, shares: list[float],
         return [None] * len(hourly)
 
     minutes, targets, windows = _hour_starts(hourly)
-    if multi_step == "recursive":
-        totals = _base_paths(model_type, directory, minutes, targets, windows).sum(axis=1)
-    elif multi_step == "linearInput":
+    if multi_step == "linearInput":
         totals = (_arima_linear_input(directory, hourly, minutes, targets) if model_type == "arima"
                   else _recurrent_linear_input(model_type, directory, hourly, targets, windows))
-    elif multi_step == "rectify":
-        totals = _predict_rectify(model_type, directory, minutes, targets, windows)
     else:
-        totals = _predict_direct(model_type, directory, hourly, targets, windows)
+        totals = _predict_rectify(model_type, directory, minutes, targets, windows)
     # Left unclipped for every strategy alike; the backend clips the hour's share at 0.
     return [None] + [float(v) if np.isfinite(v) else None for v in totals]
 
 
 def artifact_paths(model_type: str, directory: Path) -> list[Path]:
     """Every file train() writes; all must exist for a model to count as trained."""
-    names = [META_FILE, ARTIFACT_FILE[model_type], RECTIFY_FILE, *DIRECT_FILES[model_type],
+    names = [META_FILE, ARTIFACT_FILE[model_type], RECTIFY_FILE,
              f"{HOURLY_DIR}/{META_FILE}", f"{HOURLY_DIR}/{ARTIFACT_FILE[model_type]}"]
     return [directory / name for name in names]
 

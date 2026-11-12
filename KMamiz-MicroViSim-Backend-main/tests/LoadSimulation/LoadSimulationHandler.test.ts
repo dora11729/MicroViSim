@@ -6,12 +6,15 @@ import {
   TEndpointPropagationStatsForOneTimeSlot,
 } from "../../src/MicroViSim-simulator/entities/TLoadSimulation";
 import {
-  multiStepForecasts,
+  TForecastGranularity,
   TLoadSimulationSettings,
   TSimulationEndpointMetric,
   TSimulationNamespaceServiceMetrics,
 } from "../../src/MicroViSim-simulator/entities/TSimConfigLoadSimulation";
-import { TMultiStepForecast } from "../../src/MicroViSim-simulator/classes/LoadSimulation/MLModelClient";
+import {
+  mlForecastStrategies,
+  TMLForecastStrategy,
+} from "../../src/MicroViSim-simulator/classes/LoadSimulation/MLModelClient";
 
 const SecondsPerHour = 3600;
 const ServiceName = "order";
@@ -26,10 +29,10 @@ const UniqueEndpointName = SimulatorUtils.generateUniqueEndpointName(
 // The same shares from every strategy, unless one is overridden.
 function sharesByStrategy(
   shares: (number | null)[],
-  overrides: Partial<Record<TMultiStepForecast, (number | null)[]>> = {}
-): Record<TMultiStepForecast, (number | null)[]> {
-  return Object.fromEntries(multiStepForecasts.map(m => [m, overrides[m] ?? shares])) as
-    Record<TMultiStepForecast, (number | null)[]>;
+  overrides: Partial<Record<TMLForecastStrategy, (number | null)[]>> = {}
+): Record<TMLForecastStrategy, (number | null)[]> {
+  return Object.fromEntries(mlForecastStrategies.map(m => [m, overrides[m] ?? shares])) as
+    Record<TMLForecastStrategy, (number | null)[]>;
 }
 
 type TScalingOptions = {
@@ -112,15 +115,15 @@ async function scale(
   baseReplicaCount = 1,
   scaling?: TScalingOptions,
   dailyRequestCount = 0,
-  multiStepForecast: TMultiStepForecast = "recursive"
+  forecastGranularity: TForecastGranularity = "minute"
 ): Promise<number[]> {
   const { propagationResults, metricsPerTimeSlotMap } = mockTimeline(rpsPerSlot, baseReplicaCount);
   const settings: Pick<TLoadSimulationSettings, "serviceMetrics" | "endpointMetrics"> & {
-    config: Pick<TLoadSimulationSettings["config"], "multiStepForecast">;
+    config: Pick<TLoadSimulationSettings["config"], "forecastGranularity">;
   } = {
     serviceMetrics: mockServiceMetrics(scaling),
     endpointMetrics: [mockEndpointMetric(dailyRequestCount)],
-    config: { multiStepForecast },
+    config: { forecastGranularity },
   };
   await (LoadSimulationHandler.getInstance() as any).applyAutoScalingForTimeSlot(
     settings,
@@ -179,12 +182,12 @@ describe("LoadSimulationHandler model-driven auto-scaling", () => {
     );
   });
 
-  it("scales by the configured strategy only", async () => {
+  it("scales by the configured granularity only", async () => {
     jest.spyOn(client, "train").mockResolvedValue();
     jest.spyOn(client, "predictShares").mockResolvedValue(
       sharesByStrategy([null, 1, 1, 1], { hourly: [null, 21, 21, 21] })
     );
-    expect(await scale([1, 1, 1, 1], 1, { model: "gru" }, Daily, "recursive")).toEqual([1, 1, 1, 1]);
+    expect(await scale([1, 1, 1, 1], 1, { model: "gru" }, Daily, "minute")).toEqual([1, 1, 1, 1]);
     expect(await scale([1, 1, 1, 1], 1, { model: "gru" }, Daily, "hourly")).toEqual([1, 3, 3, 3]);
   });
 

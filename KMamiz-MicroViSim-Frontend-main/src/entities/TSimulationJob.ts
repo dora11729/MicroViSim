@@ -35,7 +35,7 @@ export type TSimulationJobStatus = {
 };
 
 // The ML service's training steps for each service, in order.
-export const TrainingSteps = ["one-minute model", "rectify kNN", "direct models", "hourly model"];
+export const TrainingSteps = ["one-minute model", "rectify kNN", "hourly model"];
 
 // What a run just accepted by the backend looks like before its first status arrives.
 export const justStartedStatus = (): TSimulationJobStatus => ({

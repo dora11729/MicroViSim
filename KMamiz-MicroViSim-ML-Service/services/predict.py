@@ -8,7 +8,7 @@ from services.model_store import read_manifest, service_dir
 
 router = APIRouter()
 
-MultiStep = Literal["recursive", "linearInput", "rectify", "direct", "hourly"]
+MultiStep = Literal["linearInput", "rectify", "hourly"]
 
 
 class PredictRequest(BaseModel):

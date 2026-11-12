@@ -20,10 +20,9 @@ import { TPredictionComparison, TPredictionError } from "../entities/TPrediction
 const ACTUAL_COLOR = "#212121";
 const METHOD_STYLE: Record<string, { label: string; color: string }> = {
   naive: { label: "Naive (last hour)", color: "#9e9e9e" },
-  recursive: { label: "Recursive", color: "#1e88e5" },
   linearInput: { label: "Linear input", color: "#43a047" },
   rectify: { label: "Rectify", color: "#e53935" },
-  direct: { label: "Direct", color: "#8e24aa" },
+  minute: { label: "Minute model", color: "#1e88e5" },
   hourly: { label: "Hourly model", color: "#fb8c00" },
 };
 
@@ -132,6 +131,14 @@ export default function PredictionComparison({ comparison }: { comparison: TPred
           </TableBody>
         </Table>
       </TableContainer>
+      {service.minuteChoice && (
+        <Typography variant="caption" display="block" style={{ margin: "0.5em 1em 0" }}>
+          Minute model: each hour uses whichever of linear input and rectify was closer over the
+          last 24 hours ({["linearInput", "rectify"].map(strategy =>
+            `${styleOf(strategy).label.toLowerCase()} ${service.minuteChoice!.filter(c => c === strategy).length} h`
+          ).join(", ")}).
+        </Typography>
+      )}
       <Typography variant="caption" display="block" style={{ margin: "0.5em 1em" }}>
         Scored over the {service.scoredSlots} hours every method forecast. Each forecast for an hour
         uses only the hours before it; MAE vs naive below 1 beats repeating the last hour.
