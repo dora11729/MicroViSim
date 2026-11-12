@@ -3,6 +3,7 @@ import Simulator from "../classes/Simulator";
 import SimulationConfigManager from "../classes/SimulationConfigManager";
 import ServiceOperator from "../../services/ServiceOperator";
 import ImportExportHandler from "../../services/ImportExportHandler";
+import MongoOperator from "../../services/MongoOperator";
 import multer from "multer";
 import { TPredictionComparison } from "../entities/TPredictionComparison";
 import SimulationJobManager from "../classes/SimulationJob";
@@ -23,7 +24,13 @@ export default class SimulationService extends IRequestHandler {
     // (A new object: the default one is shared by every response.)
     this.addRoute("get", "/predictions", async (_, res) => {
       res.cacheControl = { noStore: true };
-      res.json(this.predictionComparison ?? { dates: [], methods: [], configuredMethod: "", services: [] });
+      const comparison = this.predictionComparison;
+      if (!comparison) {
+        return res.json({ dates: [], methods: [], configuredMethod: "", services: [] });
+      }
+      // The charts show simulated time (Day 1 00:00 on); move the forecasts with them.
+      const offset = await MongoOperator.getInstance().getSimulationDisplayOffset();
+      res.json(offset === null ? comparison : { ...comparison, dates: comparison.dates.map(date => date - offset) });
     });
 
     this.addRoute(

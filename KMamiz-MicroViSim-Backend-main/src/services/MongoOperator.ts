@@ -99,19 +99,28 @@ export default class MongoOperator {
     // (e.g., 7/7 15:39 => Day 1 00:00) instead of actual timestamps
     if (GlobalSettings.SimulatorMode && rawHistoricalData.length > 0) {
       // Take the first data point directly (MongoDB query is already sorted by time ascending)
-      const earliestDate = new Date(rawHistoricalData[0].date);
-      // Target base time: 2000-01-01T00:00:00.000Z
-      const baseTime = new Date(2000, 0, 1, 0, 0, 0, 0).getTime();
-
-      // Calculate offset = earliestDate timestamp - baseTime timestamp
-      const offset = earliestDate.getTime() - baseTime;
-
-      // This offset will be subtracted from all data points so that the earliest data aligns to 2000-01-01 00:00:00
-      // This helps the frontend display data starting from "Day 1 00:00" instead of the actual dates like 7/7 15:39.
+      const offset = this.simulationDisplayOffset(new Date(rawHistoricalData[0].date));
       rawHistoricalData = this.applyDateOffsetForDisplaySimulationTime(rawHistoricalData, offset);
     }
 
     return rawHistoricalData;
+  }
+
+  /*
+    What getHistoricalData subtracts from every date in simulator mode, so that data
+    shown beside the charts (e.g. forecasts) can be moved the same way; null when there
+    is no historical data.
+  */
+  async getSimulationDisplayOffset(): Promise<number | null> {
+    const earliest = await HistoricalDataModel.findOne({}, { date: 1 }).sort({ date: 1 }).exec();
+    return earliest ? this.simulationDisplayOffset(new Date(earliest.date)) : null;
+  }
+
+  // Moves the earliest data to 2000-01-01 00:00, so the frontend shows "Day 1 00:00"
+  // instead of the actual dates like 7/7 15:39.
+  private simulationDisplayOffset(earliestDate: Date): number {
+    const baseTime = new Date(2000, 0, 1, 0, 0, 0, 0).getTime();
+    return earliestDate.getTime() - baseTime;
   }
 
   private applyDateOffsetForDisplaySimulationTime(rawHistoricalData: THistoricalData[], offset: number) {
